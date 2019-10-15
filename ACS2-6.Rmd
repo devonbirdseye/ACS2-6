@@ -250,22 +250,6 @@ HtoP_ttest <- function(csv){
 }
 
 ```
-```{r}
-test_ttest <- function(csv){
-  result <- NULL
-  for(i in 1:(nrow(csv))){
-  mo17v = (as.numeric(csv[i, 7:8]))
-  b73v = (as.numeric(csv[i, 2:3]))
-  parentv = rowMeans(cbind(mo17v, b73v))
-  hybv = (as.numeric(csv[i, 5:6]))
-  t_test <- t.test(parentv, hybv, var.equal = TRUE)
-  pval <- t_test$p.value
-  result[i] <- pval
-  }
-  result
-}
-```
-
 
 ```{r DF_function}
 DF <- function(csv){
@@ -286,33 +270,223 @@ DF_ACSSigDif <- function(csv){
 df2
 }
 ```
-```{r}
-colnames(df_MergeAcc_NoDupes_merge_fixed_NoDecoys)
-```
+
 ```{r}
 #Build distance matrix of bio reps
-df_MergeAcc_NoDupes_dist_bioreps <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys[,2:11]
-
-colnames(df_MergeAcc_NoDupes_dist_bioreps)<- c("b73.1", "b73.2", "b73.3", "BM.1", "BM.2", "mo17.1", "mo17.2", "acs.1", "acs.2", "acs.3")
-
+df_MergeAcc_NoDupes_dist_bioreps <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
+df_MergeAcc_NoDupes_dist_bioreps <- df_MergeAcc_NoDupes_dist_bioreps[,c(2:11)]
+colnames(df_MergeAcc_NoDupes_dist_bioreps)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
 df_MergeAcc_NoDupes_dist_bioreps <- t(df_MergeAcc_NoDupes_dist_bioreps)
-
 dist_bioreps <- dist(df_MergeAcc_NoDupes_dist_bioreps, method = "euclidean")
-
 dist_bioreps
 ```
 ```{r}
+#Build distance matrix of bio reps
+df_MergeAcc_NoDupes_dist_bioreps_100k <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
+df_MergeAcc_NoDupes_dist_bioreps_100k <- df_MergeAcc_NoDupes_dist_bioreps_100k[(df_MergeAcc_NoDupes_dist_bioreps_100k$Normalized_129N.E..SpectrumMill.msdataSM.PGRP2016.ACS2.6.B73x3.Mo17x2.BMx2.ACSx3.TMT10.100ug.2D.093019.QE1>100000),]
+df_MergeAcc_NoDupes_dist_bioreps_100k<- df_MergeAcc_NoDupes_dist_bioreps_100k[,c(2:11)]
+colnames(df_MergeAcc_NoDupes_dist_bioreps_100k)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
+df_MergeAcc_NoDupes_dist_bioreps_100k <- t(df_MergeAcc_NoDupes_dist_bioreps_100k)
+
+```
+
+```{r}
 #Plot distance matrix - bio reps
-res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps, stand = TRUE, method = "pearson")
+res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
-   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
+
+ggsave("bioreps_dist.png")
 ```
 ```{r}
+#order=(c( "acs.2", "acs.3", "b73.1", "BM.1", "b73.2", "BM.2", "mo17.1", "acs.1", "b73.1", "mo17.2"))
 #build heirarchical clustering - bio reps
 hc_bioreps<- hclust(dist_bioreps, method = "ward.D2")
 hcd_bioreps <- as.dendrogram(hc_bioreps)
 plot(hcd_bioreps, type = "rectangle", ylab = "height")
 ```
+```{r}
+#Build distance matrix of bio reps
+df_MergeAcc_NoDupes_dist_bioreps_plastid <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
+df_MergeAcc_NoDupes_dist_bioreps_plastid <- df_MergeAcc_NoDupes_dist_bioreps_plastid[grep("NP_04",df_MergeAcc_NoDupes_dist_bioreps_plastid$Protein),]
+df_MergeAcc_NoDupes_dist_bioreps_plastid <- df_MergeAcc_NoDupes_dist_bioreps_plastid[,c(2:11)]
+colnames(df_MergeAcc_NoDupes_dist_bioreps_plastid)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
+df_MergeAcc_NoDupes_dist_bioreps_plastid <- t(df_MergeAcc_NoDupes_dist_bioreps_plastid)
+dist_bioreps_plastid <- dist(df_MergeAcc_NoDupes_dist_bioreps_plastid, method = "euclidean")
+dist_bioreps_plastid
+```
+
+```{r}
+#Plot distance matrix - bio reps
+res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps_plastid, stand = F, method = "euclidian")
+factoextra::fviz_dist(res.dist_bioreps, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
+ggsave("bioreps_plastid_dist.png")
+```
+```{r}
+#order=(c( "acs.2", "acs.3", "b73.1", "BM.1", "b73.2", "BM.2", "mo17.1", "acs.1", "b73.1", "mo17.2"))
+#build heirarchical clustering - bio reps
+hc_bioreps_plastid<- hclust(dist_bioreps_plastid, method = "ward.D2")
+hcd_bioreps_plastid <- as.dendrogram(hc_bioreps_plastid)
+plot(hcd_bioreps_plastid, type = "rectangle", ylab = "height")
+```
+
+
+```{r}
+#Build distance matrix of bio reps
+df_MergeAcc_NoDupes_dist_bioreps_go.photo<- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
+df_MergeAcc_NoDupes_dist_bioreps_go.photo <- df_MergeAcc_NoDupes_dist_bioreps_go.photo[(df_MergeAcc_NoDupes_dist_bioreps_go.photo$maizegdb%in%accessions.go.photosynthesis),]
+df_MergeAcc_NoDupes_dist_bioreps_go.photo <- df_MergeAcc_NoDupes_dist_bioreps_go.photo[,c(2:11)]
+colnames(df_MergeAcc_NoDupes_dist_bioreps_go.photo)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
+df_MergeAcc_NoDupes_dist_bioreps_go.photo <- t(df_MergeAcc_NoDupes_dist_bioreps_go.photo)
+dist_bioreps_go.photo <- dist(df_MergeAcc_NoDupes_dist_bioreps_go.photo, method = "euclidean")
+dist_bioreps_go.photo
+```
+
+
+```{r}
+#Plot distance matrix - bio reps
+res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps_go.photo, stand = F, method = "euclidian")
+factoextra::fviz_dist(res.dist_bioreps, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+#ggsave("bioreps_nuclear_GO_photo_dist.png")
+```
+```{r}
+#order=(c( "acs.2", "acs.3", "b73.1", "BM.1", "b73.2", "BM.2", "mo17.1", "acs.1", "b73.1", "mo17.2"))
+#build heirarchical clustering - bio reps
+hc_bioreps_go.photo<- hclust(dist_bioreps_go.photo)
+hcd_bioreps_go.photo <- as.dendrogram(hc_bioreps_go.photo)
+plot(hcd_bioreps_go.photo, type = "rectangle", ylab = "height")
+```
+
+
+```{r}
+#Build distance matrix of bio reps
+df_MergeAcc_NoDupes_dist_bioreps_go.ribosome<- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
+df_MergeAcc_NoDupes_dist_bioreps_go.ribosome <- df_MergeAcc_NoDupes_dist_bioreps_go.ribosome[grep("ribosomal protein",df_MergeAcc_NoDupes_dist_bioreps_go.ribosome$Protein),]
+df_MergeAcc_NoDupes_dist_bioreps_go.ribosome <- df_MergeAcc_NoDupes_dist_bioreps_go.ribosome[,c(2:11)]
+colnames(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
+df_MergeAcc_NoDupes_dist_bioreps_go.ribosome <- t(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome)
+dist_bioreps_go.ribosome <- dist(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome, method = "euclidean", diag=T, upper=T)
+dist_bioreps_go.ribosome
+```
+```{r}
+dist_bioreps_go.ribosome.m <- as.matrix(dist_bioreps_go.ribosome)
+dist_bioreps_go.photo.m <- as.matrix(dist_bioreps_go.photo)
+dist_bioreps_plastid.m <- as.matrix(dist_bioreps_plastid)
+dist_bioreps.m <- as.matrix(dist_bioreps)
+```
+```{r}
+df_MergeAcc_NoDupes_dist_bioreps
+```
+
+```{r}
+library(RColorBrewer)
+heatmap(dist_bioreps_go.ribosome.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+```{r}
+heatmap(dist_bioreps_go.photo.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+```{r}
+heatmap(dist_bioreps_plastid.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+
+```{r}
+heatmap(dist_bioreps.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+
+```{r}
+#Plot distance matrix - bio reps
+res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome, stand = F, method = "euclidian")
+factoextra::fviz_dist(res.dist_bioreps, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = c())
+ggsave("bioreps_nuclear_ribosomalprotein_dist.png")
+```
+```{r}
+#order=(c( "acs.2", "acs.3", "b73.1", "BM.1", "b73.2", "BM.2", "mo17.1", "acs.1", "b73.1", "mo17.2"))
+#build heirarchical clustering - bio reps
+hc_bioreps_go.ribosome<- hclust(dist_bioreps_go.ribosome, method = "complete")
+hcd_bioreps_go.ribosome <- as.dendrogram(hc_bioreps_go.ribosome)
+plot(hcd_bioreps_go.ribosome, type = "rectangle", ylab = "height")
+```
+```{r}
+#Build distance matrix of bio reps
+df_MergeAcc_NoDupes_dist_bioreps_photo <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
+df_MergeAcc_NoDupes_dist_bioreps_photo <- df_MergeAcc_NoDupes_dist_bioreps_photo[(df_MergeAcc_NoDupes_dist_bioreps_photo$Accession%in%accession.photo),]
+df_MergeAcc_NoDupes_dist_bioreps_photo <- df_MergeAcc_NoDupes_dist_bioreps_photo[,c(2:11)]
+colnames(df_MergeAcc_NoDupes_dist_bioreps_photo)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
+df_MergeAcc_NoDupes_dist_bioreps_photo <- t(df_MergeAcc_NoDupes_dist_bioreps_photo)
+dist_bioreps_photo <- dist(df_MergeAcc_NoDupes_dist_bioreps_photo, method = "euclidean")
+dist_bioreps_photo
+```
+```{r}
+#Plot distance matrix - bio reps
+res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps_photo, stand = F, method = "euclidian")
+factoextra::fviz_dist(res.dist_bioreps, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
+#ggsave("bioreps_photo_dist.png")
+```
+```{r}
+df_MergeAcc_NoDupes_dist_bioreps_go.photo.t <- t(df_MergeAcc_NoDupes_dist_bioreps_go.photo)
+heatmap(df_MergeAcc_NoDupes_dist_bioreps_go.photo.t)
+```
+```{r}
+df_MergeAcc_NoDupes_dist_bioreps_go.ribosome.t <- t(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome)
+heatmap(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome.t)
+```
+
+```{r}
+df_MergeAcc_NoDupes_dist_bioreps.t <- t(df_MergeAcc_NoDupes_dist_bioreps)
+heatmap(df_MergeAcc_NoDupes_dist_bioreps.t)
+```
+```{r}
+df_MergeAcc_NoDupes_dist_bioreps_plastid.t <- t(df_MergeAcc_NoDupes_dist_bioreps_plastid)
+heatmap(df_MergeAcc_NoDupes_dist_bioreps_plastid.t)
+```
+
+
+
+```{r}
+df_MergeAcc_NoDupes_dist_bioreps_MPs <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
+df_MergeAcc_NoDupes_dist_bioreps_MPs <- df_MergeAcc_NoDupes_dist_bioreps_MPs[grep("NP_04",df_MergeAcc_NoDupes_dist_bioreps_MPs$Protein),]
+df_MergeAcc_NoDupes_dist_bioreps_MPs <- df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(2:8)]
+```
+```{r}
+colnames(df_MergeAcc_NoDupes_dist_bioreps_MPs)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2")
+```
+```{r}
+df_MergeAcc_NoDupes_dist_bioreps_MPs$b1m1 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(1,4)])
+df_MergeAcc_NoDupes_dist_bioreps_MPs$b1m2 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(1,5)])
+df_MergeAcc_NoDupes_dist_bioreps_MPs$b2m1 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(2,4)])
+df_MergeAcc_NoDupes_dist_bioreps_MPs$b3m1 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(3,4)])
+df_MergeAcc_NoDupes_dist_bioreps_MPs$b2m2 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(2,5)])
+df_MergeAcc_NoDupes_dist_bioreps_MPs$b3m2 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(3,5)])
+```
+
+```{r}
+df_MergeAcc_NoDupes_dist_bioreps_MPs <- t(df_MergeAcc_NoDupes_dist_bioreps_MPs)
+dist_bioreps_MPs <- dist(df_MergeAcc_NoDupes_dist_bioreps_MPs, method = "euclidean")
+```
+```{r}
+hc_bioreps_MPs<- hclust(dist_bioreps_MPs)
+hcd_bioreps_MPs <- as.dendrogram(hc_bioreps_MPs)
+plot(hcd_bioreps_MPs, type = "rectangle", ylab = "height")
+```
+
+```{r}
+res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps_MPs, stand = F, method = "spearman")
+factoextra::fviz_dist(res.dist_bioreps, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+```
+
+
+```{r}
+df_MergeAcc_NoDupes_merge_fixed_NoDecoys_go.photo <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys[(df_MergeAcc_NoDupes_merge_fixed_NoDecoys$maizegdb%in%accessions.go.photosynthesis),]
+```
+```{r}
+refseqpep.go.photo <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys_go.photo$RefSeqPep
+```
+
 
 ```{r}
 #Build distance matrix
@@ -368,6 +542,14 @@ colnames(GAMER) <- c("db", "db_object_id", "db_object_symbol", "qualifier", "ter
 gamer <- GAMER[-(1:2),]
 
 gamer$Term <- Term(as.character(gamer$term_accession))
+```
+```{r}
+go.photosynthesis <- na.omit(gamer[(gamer$Term=="photosynthesis"),])
+accessions.go.photosynthesis <- go.photosynthesis$db_object_id
+```
+```{r}
+go.ribosome <- na.omit(gamer[(gamer$Term=="ribosome"),])
+accessions.go.ribosome <- go.ribosome$db_object_id
 ```
 
 
@@ -799,6 +981,7 @@ print(showGroupDensity(HybGOdata_10above_BP, "GO:0019750", ranks = T, rm.one = F
 ```
 
 
+
 #### KEGG
 #First get UIDs from gi's:
 ```{r}
@@ -872,12 +1055,12 @@ for(i in 1:nrow(DF_dupes_sums)){
 
 ```{r}
 #Re-structure for input in Deseq2:
-UID_ACS_reorder_ForDeseq <- UID_reorder_OneDupe[,(c(16:18,9:11))]
-colnames(UID_ACS_reorder_ForDeseq) <- c("ACS.1", "ACS.2", "ACS.3", "B73.1", "B73.2", "B73.3")
+UID_ACS_reorder_ForDeseq <- UID_reorder_OneDupe[,(c(17:18,10:11))]
+colnames(UID_ACS_reorder_ForDeseq) <- c("ACS.2", "ACS.3","B73.2", "B73.3")
 rownames(UID_ACS_reorder_ForDeseq) <- UID_reorder_OneDupe$UID
 
 #Create colData object for Deseq2:
-colData_ACS_DF <- data.frame("condition"= c("ACS","ACS","ACS", "B73", "B73", "B73"), stringsAsFactors = T)
+colData_ACS_DF <- data.frame("condition"= c("ACS","ACS", "B73", "B73"), stringsAsFactors = T)
 rownames(colData_ACS_DF)<- colnames(UID_ACS_reorder_ForDeseq)
 
 #Create countData object for Deseq2:
@@ -935,19 +1118,16 @@ FoldChanges_ACS_DF <- res_ACS_DF$log2FoldChange
 names(FoldChanges_ACS_DF) <- rownames(res_ACS_DF)
 head(FoldChanges_ACS_DF)
 ```
+
 ```{r}
-df_DF[grep("Zm00001d020686",df_DF$ID),]
-```
-```{r}
-3988771/(mean(7971387, 3659407))
-4967139/7971387
+colnames(UID_reorder_OneDupe)
 ```
 
 #Hyb
 ```{r}
 #Re-structure for input in Deseq2:
-UID_reorder_OneDupe$MP1 <- rowMeans(UID_reorder_OneDupe[,c(9,12)])
-UID_reorder_OneDupe$MP2 <- rowMeans(UID_reorder_OneDupe[,c(10,13)])
+UID_reorder_OneDupe$MP1 <- rowMeans(UID_reorder_OneDupe[,c(9:13)])
+UID_reorder_OneDupe$MP2 <- rowMeans(UID_reorder_OneDupe[,c(9:13)])
 UID_HYB_reorder_ForDeseq <- UID_reorder_OneDupe[,(c(14:15,23:24))]
 colnames(UID_HYB_reorder_ForDeseq) <- c("HYB.1", "HYB.2", "MP.1", "MP.2")
 rownames(UID_HYB_reorder_ForDeseq) <- UID_reorder_OneDupe$UID
@@ -990,36 +1170,24 @@ plot( res_HYB_DF$log2FoldChange, -log(res_HYB_DF$padj), col=mycols_HYB_DF, xlab=
 ```
 
 ```{r}
-FoldChanges_HYB_DF <- res_HYB_DF$log2FoldChange
-names(FoldChanges_HYB_DF) <- rownames(res_HYB_DF)
-head(FoldChanges_HYB_DF)
-```
-
-
-```{r}
 countData_HYB_DF_Log2FC <- UID_HYB_reorder_ForDeseq
-```
-```{r}
+
 countData_HYB_DF_Log2FC$Hyb2MP.1 <- log2(countData_HYB_DF_Log2FC$HYB.1/countData_HYB_DF_Log2FC$MP.1)
 countData_HYB_DF_Log2FC$Hyb2MP.2 <- log2(countData_HYB_DF_Log2FC$HYB.2/countData_HYB_DF_Log2FC$MP.2)
-```
-```{r}
+
 countData_HYB_DF_Log2FC<- countData_HYB_DF_Log2FC[,c(5:6)]
 ```
+
+
 ```{r}
 countData_ACS_DF_Log2FC<- UID_ACS_reorder_ForDeseq
-```
-```{r}
-countData_ACS_DF_Log2FC$acs2B73.1 <- log2(countData_ACS_DF_Log2FC$ACS.1/countData_ACS_DF_Log2FC$B73.1)
+
 countData_ACS_DF_Log2FC$acs2B73.2 <- log2(countData_ACS_DF_Log2FC$ACS.2/countData_ACS_DF_Log2FC$B73.2)
 countData_ACS_DF_Log2FC$acs2B73.3 <- log2(countData_ACS_DF_Log2FC$ACS.3/countData_ACS_DF_Log2FC$B73.3)
 ```
 ```{r}
-countData_ACS_DF_Log2FC <- countData_ACS_DF_Log2FC[,c(7:9)]
+countData_ACS_DF_Log2FC <- countData_ACS_DF_Log2FC[,c(5:6)]
 ```
-
-
-
 
 
 ### Pathview and GAGE to create KEGG maps
@@ -1027,20 +1195,8 @@ countData_ACS_DF_Log2FC <- countData_ACS_DF_Log2FC[,c(7:9)]
 ```{r}
 zma <- kegg.gsets(species = "zma", id.type = "entrez")
 
-keggres_ACS_DF <- gage(FoldChanges_ACS_DF, gsets = zma$kg.sets)
-keggres_HYB_DF <- gage(FoldChanges_HYB_DF, gsets = zma$kg.sets)
-```
-```{r}
-keggres_HYB_DF2 <- gage(countData_HYB_DF_Log2FC, gsets = zma$kg.sets, samp = c(1:2))
-keggres_ACS_DF2 <- gage(countData_ACS_DF_Log2FC, gsets = zma$kg.sets, samp = c(1:3))
-```
-```{r}
-keggres_HYB_DF2_NotSameDir <- gage(countData_HYB_DF_Log2FC, gsets = zma$kg.sets, samp = c(1:2), same.dir = F)
-keggres_ACS_DF2_NotSameDir <- gage(countData_ACS_DF_Log2FC, gsets = zma$kg.sets, samp = c(1:3), same.dir = F)
-```
-```{r}
-keggres_ACS_DF_NotSameDir <- gage(FoldChanges_ACS_DF, gsets = zma$kg.sets, same.dir = F)
-keggres_HYB_DF_NotSameDir <- gage(FoldChanges_HYB_DF, gsets = zma$kg.sets, same.dir = F)
+keggres_HYB_DF <- gage(countData_HYB_DF_Log2FC, gsets = zma$kg.sets, samp = c(1:2), same.dir = F)
+keggres_ACS_DF <- gage(countData_ACS_DF_Log2FC, gsets = zma$kg.sets, samp = c(1:3), same.dir = F)
 ```
 
 
@@ -1068,7 +1224,7 @@ for(i in 1:nrow(Vm)){
 
 
 ```{r}
-PVfun(keggres_HYB_DF2_NotSameDir$greater, countData_HYB_DF_Log2FC)
+PVfun(keggres_HYB_DF$greater, countData_HYB_DF_Log2FC)
 ```
 
 ```{r}
