@@ -6,7 +6,6 @@ output: github_document
 ---
 
 # Analysis of ACS2/6 mutant proteomics & comparison to BxM hybrid
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 set.seed(586)
@@ -211,9 +210,9 @@ saveRDS(PrevSL_trim_epost, "PrevSL_trim_epost")
 ```
 
 
+
 # Re-start here after cleared environment
 ## Data import and editing
-
 ### Read DF RDS
 ```{r Read DF RDS}
 df_NoDecoys_Biomart_epost <- readRDS("df_NoDecoys_Biomart_epost")
@@ -404,9 +403,9 @@ DF.acs.NOT.bm.sig.10below <- DF.acs.sig.10below[!(DF.acs.sig.10below$GI%in%DF.bm
 (nrow(DF.bm.AND.acs.sig.10below)+nrow(DF.bm.NOT.acs.sig.10below)+nrow(DF.acs.NOT.bm.sig.10below))==(length(unique(c(DF.bm.sig.10below$GI,DF.acs.sig.10below$GI))))
 ```
 
+
 # KEGG
 ## Pathview and GAGE to create KEGG maps
-
 ### Define gsets and run gage on acs and hyb
 ```{r Define gsets and run gage on acs and hyb}
 zma <- kegg.gsets(species = "zma", id.type = "entrez")
@@ -515,6 +514,7 @@ dev.off()
 ```{r KEGG:AminoAcidBio, eval=FALSE, echo=FALSE}
 BiosynthesisAAs <- pathview(gene.data = DF.bm.l2fc, pathway.id = "zma01230", species="zma", out.suffix = "BiosynthesisAAs_HYB", keys.align = "y", kegg.native = F, match.data = F, multi.state = T, same.layer = T, cex=0.125, afactor=3, map.null = T, expand.node = T)
 ```
+
 
 
 # GO analysis
@@ -635,8 +635,12 @@ GO.DF.l <- GOanalysisDF.list(GOdata.list)
 #Save list of GO term enrichment tables
 saveRDS(GO.DF.l, "GO.DF.l")
 ```
+
+
+
+
 ### Read back in analyzed data
-```{r}
+```{r readRDS}
 #Load back in GOdata list and GO term enrichment table list
 GOdata.list <- readRDS("GOdata.list")
 GO.DF.l <- readRDS("GO.DF.l")
@@ -652,7 +656,7 @@ for(i in 1:length(l)){
 ```
 
 ### GO-term enrichment tables
-```{r}
+```{r GO-term enrichment tablesøØ}
 printDFs(GO.DF.l)
 ```
 
@@ -694,7 +698,7 @@ saveRDS(GO.venn.DF.l, "GO.venn.DF.l")
 ```
 
 ### Read back in analyzed data
-```{r}
+```{r readRDS}
 #Load back in GOdata list and GO term enrichment table list
 GOdata.venn.list <- readRDS("GOdata.venn.list")
 GO.venn.DF.l <- readRDS("GO.venn.DF.l")
@@ -702,6 +706,23 @@ GO.venn.DF.l <- readRDS("GO.venn.DF.l")
 ### Venn diagram discrete sections GO-term enrichments
 ```{r}
 printDFs(GO.venn.DF.l)
+```
+
+### Select Significant genes from given GO term in a GOdata object and return their proteins
+```{rSelectSigGOgenes function}
+SelectSigGOgenes <- function(GOdata, GOterm){
+ df <- data.frame(gene=(topGO::genesInTerm(GOdata, GOterm)), score=(topGO::scoresInTerm(GOdata, GOterm))) 
+# df.s <- df[]
+ colnames(df) <- c("gene", "score")
+ df$gene <- as.character(df$gene)
+ df.s <- df[(df$score==2),]
+ df.s.prot <- merge.data.frame(df.s, DF, by.x = "gene", by.y = "V4")
+ df.s.prot
+}
+
+```
+```{rrSelectSigGOgenes run}
+SelectSigGOgenes(GOdata.list$DF.acs.sig.10below.godataBP, "GO:0010025")
 ```
 
 
@@ -814,6 +835,7 @@ hcd_bioreps_go.ribosome <- as.dendrogram(hc_bioreps_go.ribosome)
 plot(hcd_bioreps_go.ribosome, type = "rectangle", ylab = "height")
 ```
 
+
 # heatmaps 
 ```{r}
 library(RColorBrewer)
@@ -842,6 +864,7 @@ heatmap(dist_bioreps_go.photo.m, col =colorRampPalette(brewer.pal(8, "Blues"))(2
 heatmap(dist_bioreps_go.ribosome.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 
+
 # heatmaps of individual protein expression
 ## heatmap:all
 ```{r}
@@ -863,6 +886,7 @@ heatmap(df_NoDecoys_Biomart_epost_bioreps_go.photo.t)
 df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.ribosome)
 heatmap(df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t)
 ```
+
 
 
 # PlotExp function
