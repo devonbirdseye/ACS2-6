@@ -2,16 +2,15 @@
 title: "ACS2/6"
 author: "Devon Birdseye"
 date: "10/3/2019"
-output: html_document
+output: BiocStyle::html_document
 ---
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(knitr)
-knit_hooks$set(optipng = hook_optipng)
 set.seed(586)
 ```
-
+## libraries
 ```{r libraries, include=FALSE}
 library(biomaRt)
 library(reshape2)
@@ -214,20 +213,20 @@ saveRDS(PrevSL_trim_epost, "PrevSL_trim_epost")
 # Re-start here after cleared environment
 ## Data import and editing
 
-Read DF RDS
+### Read DF RDS
 ```{r Read DF RDS}
 df_NoDecoys_Biomart_epost <- readRDS("df_NoDecoys_Biomart_epost")
 PrevSL_trim_epost2 <- readRDS("PrevSL_trim_epost")
 ```
 
-Re-order columns
+### Re-order columns
 ```{r Re-order columns}
 DF <- df_NoDecoys_Biomart_epost
 DF<- DF[,c(1,2,42,44,18,3:12)]
 colnames(DF)<- c("GI", "RefSeqPep", "UID", "V4", "Protein", "b731", "b732", "b733", "mo171", "mo172", "bm1", "bm2", "acs1", "acs2", "acs3")
 ```
 
-geomean functions
+### geomean functions
 ```{r geomean functions}
 BMgeomean <- function(df){
   x <- NULL
@@ -260,7 +259,7 @@ ACSgeomean <- function(df){
 }
 ```
 
-Set mp, bm/mp, Avgs, and SDS
+### Set mp, bm/mp, Avgs, and SDS
 ```{r Set mp, bm/mp, Avgs, and SDS}
 DF$mp1 <- rowMeans(DF[,c(6,9)])
 
@@ -278,7 +277,7 @@ DF$sds.bm.mp <- rowSds(as.matrix(DF[,17:18]), na.rm = T)
 DF$sds.acs.b73 <- rowSds(as.matrix(DF[,19:21]), na.rm = T)
 ```
 
-Analyze PrevSL data
+### Analyze PrevSL data
 ```{r analyze PrevSL data}
 #Set NAs to 0
 PrevSL_trim_epost2$b731[PrevSL_trim_epost2$b731==0]<-NA
@@ -306,7 +305,7 @@ PrevSL_trim_epost2$sds.bm.mp <- rowSds(as.matrix(PrevSL_trim_epost2[,18:20]), na
 ```{r write table PrevSL l2fc for Corn Cyc analyses, eval=FALSE, echo=FALSE}
 write.table(na.omit(PrevSL_trim_epost2[,c(14,23)]), "Prot_SL.txt", sep="\t", row.names = F, col.names = F)
 ```
-Subset to sig, above, and below
+### Subset to sig, above, and below
 ```{r Subset to sig, above, and below}
 DF.acs.sig <- DF[(DF$sds.acs.b73<0.1),]
 DF.bm.sig <- DF[(DF$sds.bm.mp<0.1),]
@@ -322,7 +321,7 @@ PrevSL_trim_epost2.bm.sig.10above <- PrevSL_trim_epost2.bm.sig[(PrevSL_trim_epos
 PrevSL_trim_epost2.bm.sig.10below <- PrevSL_trim_epost2.bm.sig[(PrevSL_trim_epost2.bm.sig$avg.bm.mp<0.9),]
 ```
 
-calculate Log2(fold change)
+### calculate Log2(fold change)
 ```{r calculate Log2(fold change)}
 DF$avg.bm.mp.l2fc <- log2(DF$avg.bm.mp)
 DF$avg.acs.b73.l2fc <- log2(DF$avg.acs.b73)
@@ -340,7 +339,7 @@ PrevSL_trim_epost2$bm2.mp2.l2fc <- log2(PrevSL_trim_epost2$bm2.mp2)
 PrevSL_trim_epost2$bm3.mp3.l2fc <- log2(PrevSL_trim_epost2$bm3.mp3)
 ```
 
-Subset without duplicate UIDs for KEGG
+### Subset without duplicate UIDs for KEGG
 ```{r Subset without duplicate UIDs for KEGG}
 DF_NoDupUID <- DF[!(duplicated(DF$UID) | is.na(DF$UID)),]
 
@@ -353,7 +352,7 @@ DF_NoDupUID.txt <- DF_NoDupUID[,c(4,27)]
 write.table(DF_NoDupUID.txt, "Prot_acs.txt", sep="\t", row.names = F, col.names = F)
 ```
 
-Subset PrevSL without duplicate UIDs for KEGG
+### Subset PrevSL without duplicate UIDs for KEGG
 ```{r Subset PrevSL without duplicate UIDs for KEGG}
 PrevSL_trim_epost2_NoDupUID <- PrevSL_trim_epost2[!(duplicated(PrevSL_trim_epost2$UID) | is.na(PrevSL_trim_epost2$UID)),]
 
@@ -361,7 +360,7 @@ nrow(PrevSL_trim_epost2)
 nrow(PrevSL_trim_epost2_NoDupUID)
 ```
 
-subset to hyb and acs l2fc DFs for KEGG
+### subset to hyb and acs l2fc DFs for KEGG
 ```{r subset to hyb and acs l2fc DFs for KEGG}
 DF.bm.l2fc <- DF_NoDupUID[,28:29]
 DF.acs.l2fc <- DF_NoDupUID[,30:32]
@@ -374,7 +373,7 @@ DF.acs.sig.10below <- DF.acs.sig.10below[!(is.na(DF.acs.sig.10below$GI)),]
 DF.acs.sig.10above <- DF.acs.sig.10above[!(is.na(DF.acs.sig.10above$GI)),]
 ```
 
-subset PrevSL to hyb and acs l2fc DFs for KEGG
+### subset PrevSL to hyb and acs l2fc DFs for KEGG
 ```{r subset PrevSL to hyb and acs l2fc DFs for KEGG}
 PrevSL_trim_epost2.bm.l2fc <- PrevSL_trim_epost2_NoDupUID[,24:26]
 rownames(PrevSL_trim_epost2.bm.l2fc) <- PrevSL_trim_epost2_NoDupUID$UID
@@ -388,7 +387,7 @@ VennDiagram::venn.diagram(list("BxM"=DF.bm.sig.10above$GI, "acs2/6"=DF.acs.sig.1
 
 VennDiagram::venn.diagram(list("BxM"=DF.bm.sig.10below$GI, "acs2/6"=DF.acs.sig.10below$GI), main = "Proteins 10% below expected (sd<0.1)",main.cex = 2, cex=2, cat.cex=1.5, filename = "DF10belowVenn.png", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(0,0), main.pos = c(0.5,0.95))
 ```
-Subset DFs to discrete sections of Venn Diagrams
+### Subset DFs to discrete sections of Venn Diagrams
 ```{r Subset DFs to discrete sections of Venn Diagrams}
 DF.bm.AND.acs.sig.10above <- DF.bm.sig.10above[(DF.bm.sig.10above$GI%in%DF.acs.sig.10above$GI),]
 DF.bm.NOT.acs.sig.10above <- DF.bm.sig.10above[!(DF.bm.sig.10above$GI%in%DF.acs.sig.10above$GI),]
@@ -407,7 +406,7 @@ DF.acs.NOT.bm.sig.10below <- DF.acs.sig.10below[!(DF.acs.sig.10below$GI%in%DF.bm
 # KEGG
 ## Pathview and GAGE to create KEGG maps
 
-Define gsets and run gage on acs and hyb
+### Define gsets and run gage on acs and hyb
 ```{r Define gsets and run gage on acs and hyb}
 zma <- kegg.gsets(species = "zma", id.type = "entrez")
 
@@ -416,7 +415,7 @@ keggres_ACS_DF <- gage(DF.acs.l2fc, gsets = zma$kg.sets, samp = c(1:3), same.dir
 keggres_PrevSL_DF <- gage(PrevSL_trim_epost2.bm.l2fc, gsets = zma$kg.sets, samp = c(1:3), same.dir = T)
 ```
 
-PVfun
+### PVfun
 ```{r PVfun}
 PVfun <- function(keggres, foldchangev){
   dir.create(paste0((deparse(substitute(keggres))), "_",(deparse(substitute(foldchangev))),"/"))
@@ -511,9 +510,9 @@ BiosynthesisAAs <- pathview(gene.data = DF.bm.l2fc, pathway.id = "zma01230", spe
 ```
 
 
+# GO analysis
+## TopGO and Gamer
 
-##GO analysis
-###TopGO and Gamer
 ```{r gamer_ReadIn, include=FALSE, eval=FALSE, echo=FALSE}
 # Read in Maize GAMER GO dataset, which lists V4 accessions with all associated GO terms (Wimalanathan et al. 2018) downloaded from doi.org/10.7946/P2M925
 #unzip("maize.B73.AGPv4.aggregate.gaf.zip")
@@ -521,6 +520,7 @@ GAMER <- read.delim("maize.B73.AGPv4.aggregate.gaf", sep = "\t", header = FALSE,
 colnames(GAMER) <- c("db", "db_object_id", "db_object_symbol", "qualifier", "term_accession", "db_reference", "evidence_code", "with", "aspect", "db_object_name", "db_object_synonym", "db_object_type", "taxon", "date", "assigned_by", "annotation_extension", "gene_product_form_id")
 saveRDS(GAMER, "GAMER")
 ```
+### gamer cut
 ```{r gamer cut}
 GAMER <- readRDS("GAMER")
 gamer <- GAMER[-(1:2),]
@@ -531,7 +531,7 @@ GamerCut <- gamer[(gamer$db_object_id %in% DF$V4),]
 GamerCut_PrevSL <- gamer[(gamer$db_object_id %in% PrevSL_trim_epost2$V4),]
 ```
 
-define GO:photosynthesis genes and GO:ribosome genes
+### define GO:photosynthesis genes and GO:ribosome genes
 ```{r define GO:photosynthesis genes and GO:ribosome genes}
 go.photosynthesis <- na.omit(gamer[(gamer$Term=="photosynthesis"),])
 accessions.go.photosynthesis <- go.photosynthesis$db_object_id
@@ -540,7 +540,7 @@ go.ribosome <- na.omit(gamer[(gamer$Term=="ribosome"),])
 accessions.go.ribosome <- go.ribosome$db_object_id
 ```
 
-GOanalysis functions
+### GOanalysis functions
 ```{r GOanalysis functions}
 ## Build GOdata object
 # EnrichedDF = DF with V4 accessions for GOIs in column named "V4"
@@ -628,14 +628,14 @@ GO.DF.l <- GOanalysisDF.list(GOdata.list)
 #Save list of GO term enrichment tables
 saveRDS(GO.DF.l, "GO.DF.l")
 ```
-# Read back in analyzed data
+### Read back in analyzed data
 ```{r}
 #Load back in GOdata list and GO term enrichment table list
 GOdata.list <- readRDS("GOdata.list")
 GO.DF.l <- readRDS("GO.DF.l")
 ```
 
-printDFs function
+### printDFs function
 ```{r printDFs function}
 printDFs <- function(l){
 for(i in 1:length(l)){
@@ -644,7 +644,7 @@ for(i in 1:length(l)){
 }
 ```
 
-GO-term enrichment tables
+### GO-term enrichment tables
 ```{r}
 printDFs(GO.DF.l)
 ```
@@ -686,19 +686,20 @@ GO.venn.DF.l <- GOanalysisDF.list(GOdata.venn.list)
 saveRDS(GO.venn.DF.l, "GO.venn.DF.l")
 ```
 
-#Read back in analyzed data
+### Read back in analyzed data
 ```{r}
 #Load back in GOdata list and GO term enrichment table list
 GOdata.venn.list <- readRDS("GOdata.venn.list")
 GO.venn.DF.l <- readRDS("GO.venn.DF.l")
 ```
-Venn diagram discrete sections GO-term enrichments
+### Venn diagram discrete sections GO-term enrichments
 ```{r}
 printDFs(GO.venn.DF.l)
 ```
 
 
 # Distance matrices to analyze bio replicates
+## Build distance matrix of bio reps
 ```{r}
 #Build distance matrix of bio reps
 df_NoDecoys_Biomart_epost_bioreps <- df_NoDecoys_Biomart_epost
@@ -708,7 +709,8 @@ df_NoDecoys_Biomart_epost_bioreps <- t(df_NoDecoys_Biomart_epost_bioreps)
 dist_bioreps <- dist(df_NoDecoys_Biomart_epost_bioreps, method = "euclidean")
 dist_bioreps
 ```
-```{r  optipng='-02'}
+## Plot distance matrix 
+```{r}
 #Plot distance matrix - bio reps
 res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
@@ -716,13 +718,15 @@ factoextra::fviz_dist(res.dist_bioreps,
 
 ggsave("bioreps_dist.png")
 ```
-```{r  optipng='-o2'}
+## build heirarchical clustering
+```{r}
 #build heirarchical clustering - bio reps
 hc_bioreps<- hclust(dist_bioreps, method = "ward.D2")
 hcd_bioreps <- as.dendrogram(hc_bioreps)
 plot(hcd_bioreps, type = "rectangle", ylab = "height")
 ```
 
+## Build distance matrix of bio reps - plastid-encoded
 ```{r}
 #Build distance matrix of bio reps
 df_NoDecoys_Biomart_epost_bioreps_plastid <- df_NoDecoys_Biomart_epost
@@ -733,20 +737,23 @@ df_NoDecoys_Biomart_epost_bioreps_plastid <- t(df_NoDecoys_Biomart_epost_bioreps
 dist_bioreps_plastid <- dist(df_NoDecoys_Biomart_epost_bioreps_plastid, method = "euclidean")
 dist_bioreps_plastid
 ```
-```{r  optipng='-02'}
+## Plot distance matrix - plastid-encoded
+```{r}
 #Plot distance matrix - bio reps
 res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_plastid, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
 ggsave("bioreps_plastid_dist.png")
 ```
-```{r  optipng='-02'}
+## build heirarchical clustering - plastid-encoded
+```{r}
 #build heirarchical clustering - bio reps
 hc_bioreps_plastid<- hclust(dist_bioreps_plastid, method = "ward.D2")
 hcd_bioreps_plastid <- as.dendrogram(hc_bioreps_plastid)
 plot(hcd_bioreps_plastid, type = "rectangle", ylab = "height")
 ```
 
+## Build distance matrix of bio reps - GO:photosynthesis
 ```{r}
 #Build distance matrix of bio reps
 df_NoDecoys_Biomart_epost_bioreps_go.photo<- df_NoDecoys_Biomart_epost
@@ -757,23 +764,23 @@ df_NoDecoys_Biomart_epost_bioreps_go.photo <- t(df_NoDecoys_Biomart_epost_biorep
 dist_bioreps_go.photo <- dist(df_NoDecoys_Biomart_epost_bioreps_go.photo, method = "euclidean")
 dist_bioreps_go.photo
 ```
-
-
-```{r  optipng='-02'}
+## Plot distance matrix - GO:photosynthesis
+```{r}
 #Plot distance matrix - bio reps
 res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_go.photo, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
 ggsave("bioreps_nuclear_GO_photo_dist.png")
 ```
-```{r  optipng='-02'}
+## build heirarchical clustering - GO:photosynthesis
+```{r }
 #build heirarchical clustering - bio reps
 hc_bioreps_go.photo<- hclust(dist_bioreps_go.photo)
 hcd_bioreps_go.photo <- as.dendrogram(hc_bioreps_go.photo)
 plot(hcd_bioreps_go.photo, type = "rectangle", ylab = "height")
 ```
 
-
+## Build distance matrix of bio reps - "ribosomal protein"
 ```{r}
 #Build distance matrix of bio reps
 df_NoDecoys_Biomart_epost_bioreps_go.ribosome<- df_NoDecoys_Biomart_epost
@@ -784,60 +791,72 @@ df_NoDecoys_Biomart_epost_bioreps_go.ribosome <- t(df_NoDecoys_Biomart_epost_bio
 dist_bioreps_go.ribosome <- dist(df_NoDecoys_Biomart_epost_bioreps_go.ribosome, method = "euclidean", diag=T, upper=T)
 dist_bioreps_go.ribosome
 ```
+## Plot distance matrix - "ribosomal protein"
+```{r}
+#Plot distance matrix - bio reps
+res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_go.ribosome, stand = F, method = "euclidian")
+factoextra::fviz_dist(res.dist_bioreps, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+ggsave("bioreps_nuclear_GO_ribosome_dist.png")
+```
+## build heirarchical clustering - "ribosomal protein"
+```{r}
+#build heirarchical clustering - bio reps
+hc_bioreps_go.ribosome<- hclust(dist_bioreps_go.ribosome)
+hcd_bioreps_go.ribosome <- as.dendrogram(hc_bioreps_go.ribosome)
+plot(hcd_bioreps_go.ribosome, type = "rectangle", ylab = "height")
+```
+
+# heatmaps 
+```{r}
+library(RColorBrewer)
+```
+## build matrices
 ```{r}
 dist_bioreps_go.ribosome.m <- as.matrix(dist_bioreps_go.ribosome)
 dist_bioreps_go.photo.m <- as.matrix(dist_bioreps_go.photo)
 dist_bioreps_plastid.m <- as.matrix(dist_bioreps_plastid)
 dist_bioreps.m <- as.matrix(dist_bioreps)
 ```
-
+## heatmap:all
 ```{r}
-library(RColorBrewer)
-```
-
-```{r  optipng='-02'}
-heatmap(dist_bioreps_go.ribosome.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
-```
-```{r  optipng='-02'}
-heatmap(dist_bioreps_go.photo.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
-```
-```{r  optipng='-02'}
-heatmap(dist_bioreps_plastid.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
-```
-```{r  optipng='-02'}
 heatmap(dist_bioreps.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
-
-```{r  optipng='-02'}
-#Plot distance matrix - bio reps
-res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_go.ribosome, stand = F, method = "euclidian")
-factoextra::fviz_dist(res.dist_bioreps, 
-   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
-ggsave("bioreps_nuclear_ribosomalprotein_dist.png")
+## heatmap:plastid-encoded
+```{r}
+heatmap(dist_bioreps_plastid.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
-```{r  optipng='-02'}
-hc_bioreps_go.ribosome<- hclust(dist_bioreps_go.ribosome, method = "complete")
-hcd_bioreps_go.ribosome <- as.dendrogram(hc_bioreps_go.ribosome)
-plot(hcd_bioreps_go.ribosome, type = "rectangle", ylab = "height")
+## heatmap:GO:photosynthesis
+```{r}
+heatmap(dist_bioreps_go.photo.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+## heatmap:ribosome
+```{r}
+heatmap(dist_bioreps_go.ribosome.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 
-
-```{r  optipng='-02'}
+# heatmaps of individual protein expression
+## heatmap:all
+```{r}
 df_NoDecoys_Biomart_epost_bioreps.t <- t(df_NoDecoys_Biomart_epost_bioreps)
 heatmap(df_NoDecoys_Biomart_epost_bioreps.t)
 ```
-```{r  optipng='-02'}
-df_NoDecoys_Biomart_epost_bioreps_go.photo.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.photo)
-heatmap(df_NoDecoys_Biomart_epost_bioreps_go.photo.t)
-```
-```{r  optipng='-02'}
-df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.ribosome)
-heatmap(df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t)
-```
-```{r  optipng='-02'}
+## heatmap:plastid-encoded
+```{r}
 df_NoDecoys_Biomart_epost_bioreps_plastid.t <- t(df_NoDecoys_Biomart_epost_bioreps_plastid)
 heatmap(df_NoDecoys_Biomart_epost_bioreps_plastid.t)
 ```
+## heatmap:GO:photosynthesis
+```{r}
+df_NoDecoys_Biomart_epost_bioreps_go.photo.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.photo)
+heatmap(df_NoDecoys_Biomart_epost_bioreps_go.photo.t)
+```
+## heatmap:ribosome
+```{r}
+df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.ribosome)
+heatmap(df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t)
+```
+
 
 # PlotExp function
 ```{r PlotExp function}
@@ -852,12 +871,13 @@ all4df$sample <- factor(all4df$sample, levels = all4df$sample)
 ggplot(data=all4df, aes(x=sample, y=TMT, width=0.75)) + geom_bar(stat="identity", fill = c("blue3", "blue3", "blue3", "red3", "red3",  "purple4", "purple4", "green3", "green3", "green3")) + labs(title=V4acc)
 }
 ```
-```{r  optipng='-02'}
+## Plotting genes
+```{r}
 PlotExp("Zm00001d045479")
 ```
 
 
-#optipng
+
 
 
 
