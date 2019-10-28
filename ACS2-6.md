@@ -3,7 +3,7 @@ ACS2/6
 Devon Birdseye
 10/3/2019
 
-# Analysis of ACS2/6 mutant proteomics & comparison to BxM hybrid and inbreds
+# Analysis of ACS2/6 mutant proteomics & comparison to BxM hybrid
 
 ## libraries
 
