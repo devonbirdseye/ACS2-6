@@ -3,7 +3,7 @@ ACS2/6
 Devon Birdseye
 10/3/2019
 
-# Analysis of ACS2/6 mutant proteomics & comparison to BxM hybrid
+# Analysis of ACS2/6 mutant proteomics & comparison to BxM hybrid and inbreds
 
 ## libraries
 
@@ -1101,7 +1101,7 @@ factoextra::fviz_dist(res.dist_bioreps,
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-6-1.png" width="200px" height="200px" />
+![](ACS2-6_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
 
 ``` r
 ggsave("bioreps_dist.png")
@@ -1118,7 +1118,7 @@ hcd_bioreps <- as.dendrogram(hc_bioreps)
 plot(hcd_bioreps, type = "rectangle", ylab = "height")
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-7-1.png" width="200px" height="200px" />
+![](ACS2-6_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
 
 ## Build distance matrix of bio reps - plastid-encoded
 
@@ -1163,7 +1163,7 @@ factoextra::fviz_dist(res.dist_bioreps,
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-9-1.png" width="200px" height="200px" />
+![](ACS2-6_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
 ``` r
 ggsave("bioreps_plastid_dist.png")
@@ -1180,7 +1180,7 @@ hcd_bioreps_plastid <- as.dendrogram(hc_bioreps_plastid)
 plot(hcd_bioreps_plastid, type = "rectangle", ylab = "height")
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-10-1.png" width="200px" height="200px" />
+![](ACS2-6_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
 
 ## Build distance matrix of bio reps - <GO:photosynthesis>
 
@@ -1225,7 +1225,7 @@ factoextra::fviz_dist(res.dist_bioreps,
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-12-1.png" width="200px" height="200px" />
+![](ACS2-6_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
 
 ``` r
 ggsave("bioreps_nuclear_GO_photo_dist.png")
@@ -1242,7 +1242,7 @@ hcd_bioreps_go.photo <- as.dendrogram(hc_bioreps_go.photo)
 plot(hcd_bioreps_go.photo, type = "rectangle", ylab = "height")
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-13-1.png" width="200px" height="200px" />
+![](ACS2-6_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
 
 ## Build distance matrix of bio reps - “ribosomal protein”
 
@@ -1289,7 +1289,7 @@ factoextra::fviz_dist(res.dist_bioreps,
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-15-1.png" width="200px" height="200px" />
+![](ACS2-6_files/figure-gfm/unnamed-chunk-15-1.png)<!-- -->
 
 ``` r
 ggsave("bioreps_nuclear_GO_ribosome_dist.png")
@@ -1299,11 +1299,14 @@ ggsave("bioreps_nuclear_GO_ribosome_dist.png")
 
 ## build heirarchical clustering - “ribosomal protein”
 
-`{r} dpi=24, out.width="200px", out.height="200px" #build heirarchical
-clustering - bio reps hc_bioreps_go.ribosome<-
-hclust(dist_bioreps_go.ribosome) hcd_bioreps_go.ribosome <-
-as.dendrogram(hc_bioreps_go.ribosome) plot(hcd_bioreps_go.ribosome, type
-= "rectangle", ylab = "height")`
+``` r
+#build heirarchical clustering - bio reps
+hc_bioreps_go.ribosome<- hclust(dist_bioreps_go.ribosome)
+hcd_bioreps_go.ribosome <- as.dendrogram(hc_bioreps_go.ribosome)
+plot(hcd_bioreps_go.ribosome, type = "rectangle", ylab = "height")
+```
+
+![](ACS2-6_files/figure-gfm/unnamed-chunk-16-1.png)<!-- -->
 
 # heatmaps
 
@@ -1326,31 +1329,28 @@ dist_bioreps.m <- as.matrix(dist_bioreps)
 heatmap(dist_bioreps.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-18-1.png" width="200px" height="200px" />
-\#\#
+![](ACS2-6_files/figure-gfm/unnamed-chunk-19-1.png)<!-- --> \#\#
 heatmap:plastid-encoded
 
 ``` r
 heatmap(dist_bioreps_plastid.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-19-1.png" width="200px" height="200px" />
-\#\#
+![](ACS2-6_files/figure-gfm/unnamed-chunk-20-1.png)<!-- --> \#\#
 heatmap:<GO:photosynthesis>
 
 ``` r
 heatmap(dist_bioreps_go.photo.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-20-1.png" width="200px" height="200px" />
-\#\#
+![](ACS2-6_files/figure-gfm/unnamed-chunk-21-1.png)<!-- --> \#\#
 heatmap:ribosome
 
 ``` r
 heatmap(dist_bioreps_go.ribosome.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-21-1.png" width="200px" height="200px" />
+![](ACS2-6_files/figure-gfm/unnamed-chunk-22-1.png)<!-- -->
 
 # heatmaps of individual protein expression
 
@@ -1361,8 +1361,7 @@ df_NoDecoys_Biomart_epost_bioreps.t <- t(df_NoDecoys_Biomart_epost_bioreps)
 heatmap(df_NoDecoys_Biomart_epost_bioreps.t)
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-22-1.png" width="200px" height="200px" />
-\#\#
+![](ACS2-6_files/figure-gfm/unnamed-chunk-23-1.png)<!-- --> \#\#
 heatmap:plastid-encoded
 
 ``` r
@@ -1370,8 +1369,7 @@ df_NoDecoys_Biomart_epost_bioreps_plastid.t <- t(df_NoDecoys_Biomart_epost_biore
 heatmap(df_NoDecoys_Biomart_epost_bioreps_plastid.t)
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-23-1.png" width="200px" height="200px" />
-\#\#
+![](ACS2-6_files/figure-gfm/unnamed-chunk-24-1.png)<!-- --> \#\#
 heatmap:<GO:photosynthesis>
 
 ``` r
@@ -1379,8 +1377,7 @@ df_NoDecoys_Biomart_epost_bioreps_go.photo.t <- t(df_NoDecoys_Biomart_epost_bior
 heatmap(df_NoDecoys_Biomart_epost_bioreps_go.photo.t)
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-24-1.png" width="200px" height="200px" />
-\#\#
+![](ACS2-6_files/figure-gfm/unnamed-chunk-25-1.png)<!-- --> \#\#
 heatmap:ribosome
 
 ``` r
@@ -1388,7 +1385,7 @@ df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t <- t(df_NoDecoys_Biomart_epost_b
 heatmap(df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t)
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-25-1.png" width="200px" height="200px" />
+![](ACS2-6_files/figure-gfm/unnamed-chunk-26-1.png)<!-- -->
 
 # PlotExp function
 
@@ -1411,4 +1408,4 @@ ggplot(data=all4df, aes(x=sample, y=TMT, width=0.75)) + geom_bar(stat="identity"
 PlotExp("Zm00001d045479")
 ```
 
-<img src="ACS2-6_files/figure-gfm/unnamed-chunk-26-1.png" width="200px" height="200px" />
+![](ACS2-6_files/figure-gfm/unnamed-chunk-27-1.png)<!-- -->
