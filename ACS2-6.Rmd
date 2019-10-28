@@ -5,7 +5,7 @@ date: "10/3/2019"
 output: BiocStyle::html_document
 
 ---
-# Analysis of ACS2/6 mutant proteomics & comparison to BxM hybrid and inbreds
+# Analysis of ACS2/6 mutant proteomics & comparison to BxM hybrid
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -711,7 +711,7 @@ dist_bioreps <- dist(df_NoDecoys_Biomart_epost_bioreps, method = "euclidean")
 dist_bioreps
 ```
 ## Plot distance matrix 
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 #Plot distance matrix - bio reps
 res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
@@ -720,7 +720,7 @@ factoextra::fviz_dist(res.dist_bioreps,
 ggsave("bioreps_dist.png")
 ```
 ## build heirarchical clustering
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 #build heirarchical clustering - bio reps
 hc_bioreps<- hclust(dist_bioreps, method = "ward.D2")
 hcd_bioreps <- as.dendrogram(hc_bioreps)
@@ -739,7 +739,7 @@ dist_bioreps_plastid <- dist(df_NoDecoys_Biomart_epost_bioreps_plastid, method =
 dist_bioreps_plastid
 ```
 ## Plot distance matrix - plastid-encoded
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 #Plot distance matrix - bio reps
 res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_plastid, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
@@ -747,7 +747,7 @@ factoextra::fviz_dist(res.dist_bioreps,
 ggsave("bioreps_plastid_dist.png")
 ```
 ## build heirarchical clustering - plastid-encoded
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 #build heirarchical clustering - bio reps
 hc_bioreps_plastid<- hclust(dist_bioreps_plastid, method = "ward.D2")
 hcd_bioreps_plastid <- as.dendrogram(hc_bioreps_plastid)
@@ -766,7 +766,7 @@ dist_bioreps_go.photo <- dist(df_NoDecoys_Biomart_epost_bioreps_go.photo, method
 dist_bioreps_go.photo
 ```
 ## Plot distance matrix - GO:photosynthesis
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 #Plot distance matrix - bio reps
 res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_go.photo, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
@@ -774,7 +774,7 @@ factoextra::fviz_dist(res.dist_bioreps,
 ggsave("bioreps_nuclear_GO_photo_dist.png")
 ```
 ## build heirarchical clustering - GO:photosynthesis
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 #build heirarchical clustering - bio reps
 hc_bioreps_go.photo<- hclust(dist_bioreps_go.photo)
 hcd_bioreps_go.photo <- as.dendrogram(hc_bioreps_go.photo)
@@ -793,7 +793,7 @@ dist_bioreps_go.ribosome <- dist(df_NoDecoys_Biomart_epost_bioreps_go.ribosome, 
 dist_bioreps_go.ribosome
 ```
 ## Plot distance matrix - "ribosomal protein"
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 #Plot distance matrix - bio reps
 res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_go.ribosome, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
@@ -801,7 +801,7 @@ factoextra::fviz_dist(res.dist_bioreps,
 ggsave("bioreps_nuclear_GO_ribosome_dist.png")
 ```
 ## build heirarchical clustering - "ribosomal protein"
-```{r} out.width='10%'
+```{r} dpi=36, out.width="600px", out.height="600px"
 #build heirarchical clustering - bio reps
 hc_bioreps_go.ribosome<- hclust(dist_bioreps_go.ribosome)
 hcd_bioreps_go.ribosome <- as.dendrogram(hc_bioreps_go.ribosome)
@@ -820,40 +820,40 @@ dist_bioreps_plastid.m <- as.matrix(dist_bioreps_plastid)
 dist_bioreps.m <- as.matrix(dist_bioreps)
 ```
 ## heatmap:all
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 heatmap(dist_bioreps.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 ## heatmap:plastid-encoded
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 heatmap(dist_bioreps_plastid.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 ## heatmap:GO:photosynthesis
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 heatmap(dist_bioreps_go.photo.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 ## heatmap:ribosome
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 heatmap(dist_bioreps_go.ribosome.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 
 # heatmaps of individual protein expression
 ## heatmap:all
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 df_NoDecoys_Biomart_epost_bioreps.t <- t(df_NoDecoys_Biomart_epost_bioreps)
 heatmap(df_NoDecoys_Biomart_epost_bioreps.t)
 ```
 ## heatmap:plastid-encoded
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 df_NoDecoys_Biomart_epost_bioreps_plastid.t <- t(df_NoDecoys_Biomart_epost_bioreps_plastid)
 heatmap(df_NoDecoys_Biomart_epost_bioreps_plastid.t)
 ```
 ## heatmap:GO:photosynthesis
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 df_NoDecoys_Biomart_epost_bioreps_go.photo.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.photo)
 heatmap(df_NoDecoys_Biomart_epost_bioreps_go.photo.t)
 ```
 ## heatmap:ribosome
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.ribosome)
 heatmap(df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t)
 ```
@@ -873,7 +873,7 @@ ggplot(data=all4df, aes(x=sample, y=TMT, width=0.75)) + geom_bar(stat="identity"
 }
 ```
 ## Plotting genes
-```{r out.width='10%'}
+```{r dpi=36, out.width="600px", out.height="600px"}
 PlotExp("Zm00001d045479")
 ```
 
