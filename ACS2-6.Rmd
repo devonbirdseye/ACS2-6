@@ -3,8 +3,6 @@ title: "ACS2/6"
 author: "Devon Birdseye"
 date: "10/3/2019"
 output: github_document
-fig.width: 3
-fig.height: 3
 ---
 
 # Analysis of ACS2/6 mutant proteomics & comparison to BxM hybrid
@@ -449,6 +447,12 @@ PVfun(keggres_ACS_DF$greater, DF.acs.l2fc)
 PVfun(keggres_ACS_DF$less, DF.acs.l2fc)
 
 pathview(PrevSL_trim_epost2.bm.l2fc, pathway.id = "zma00010", species = "zma", out.suffix = "keggres_PrevSL_DF$less_Glycolysis")
+```
+
+
+### Check which genes are significantly altered in a given KEGG term
+```{r Check which genes are significantly altered in a given KEGG term}
+gage::essGene(zma$kg.sets$`zma00860 Porphyrin and chlorophyll metabolism`, DF.acs.l2fc)
 ```
 
 
