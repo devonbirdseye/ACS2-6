@@ -2,9 +2,9 @@
 title: "ACS2/6"
 author: "Devon Birdseye"
 date: "10/3/2019"
-output: html_document
-
+output: github_document
 ---
+
 # Analysis of ACS2/6 mutant proteomics & comparison to BxM hybrid
 
 ```{r setup, include=FALSE}
