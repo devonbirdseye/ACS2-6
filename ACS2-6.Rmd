@@ -4,12 +4,11 @@ author: "Devon Birdseye"
 date: "10/3/2019"
 output: html_document
 ---
-#####Start at line 180 if environment is cleared
+#####Start at line 192 if environment is cleared
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 set.seed(586)
-```
-```{r}
+
 library(biomaRt)
 library(reshape2)
 library(scales)
@@ -31,13 +30,15 @@ library(dplyr)
 library(tidyr)
 library(gridExtra)
 library(factoextra)
+library(EnvStats)
 ```
 
 ```{r Read in data}
 df <- read.csv("CSVs/B73-Mo17-BM-ACS26 TMT10 100319.csv", stringsAsFactors = F)
-```
-```{r}
-nrow(df)
+
+PrevSL_trim <- PrevSL
+PrevSL_trim <- PrevSL_trim[,c(16,17,2:10)]
+colnames(PrevSL_trim) <- c("GI", "Protein", "b731", "b732", "b733", "mo171", "mo172", "mo173", "bm1", "bm2", "bm3")
 ```
 
 ```{r BiomartRefSeqPepFun FUN}
@@ -48,78 +49,105 @@ myusemart <- useDataset("zmays_eg_gene", mart = useMart("plants_mart", host = ho
 
 BiomartRefSeqPepFun <- function(GeneVector){
   biomart <-  getBM(attributes=c("maizegdb", "refseq_peptide"), filters = ("refseq_peptide"), values = list(GeneVector), mart = myusemart)
-  biomart_noDupes <- distinct(biomart)
-  biomart_noDupes
+  biomartNoMissingMaizeGDB <- biomart[!(biomart$maizegdb==""),]
+biomartNoMissingMaizeGDB
 }
 ```
 
 ```{r Create vector of RefSeq Peptide IDs}
-df_RefSeqPepV <- substr(df$Protein, start = 5, stop = 18)
-df_RefSeqPepV <- gsub("- [A-z]", "", df_RefSeqPepV)
+#remove "decoy hits"
+df_NoDecoys <- df[-grep("decoy",df$Protein),]
+#substring to just accession
+RefSeqPepV <- substr(df_NoDecoys$Protein, start = 5, stop = 18)
+#Remove any letters
+RefSeqPepV2 <- gsub("- [A-z]", "", RefSeqPepV)
+#Make accession vector a new column on df_NoDecoys
+df_NoDecoys$RefSeqPep <- RefSeqPepV2
 ```
 
 ```{r Convert accessions via biomart}
-df_AccConv <- BiomartRefSeqPepFun(df_RefSeqPepV)
+#Run Biomart pull function
+AccConv <- BiomartRefSeqPepFun(df_NoDecoys$RefSeqPep)
+
+#restructure result so that multiple maizegdb accessions get their own column, and each row is a unique RefSeqPep
+AccConv <- AccConv %>%
+  group_by(refseq_peptide) %>%
+  mutate(maizegdbID = paste0('maizegdb.bm.', row_number())) %>%
+  spread(maizegdbID, maizegdb)
+#re-order rows
+AccConv <- AccConv[,c(1,2,8:15,3:7)]
+
+#Check stats for biomart accession conversion
+print(paste0("Input NCBI proteins = ",length(RefSeqPepV)))
+print(paste0("NCBI proteins with corresponding maizegdb IDs in Biomart = ",length(unique(AccConv$refseq_peptide))))
 ```
 
-```{r}
-#add refseqpeps as a new column on df
-df$RefSeqPep <- df_RefSeqPepV
-#merge new conversions with df by the refseqpep column
-df_MergeAcc <- merge.data.frame(df, df_AccConv, by.x = "RefSeqPep", by.y = "refseq_peptide", all.x = T, all.y = F)
-#remove duplicates
-df_MergeAcc_NoDupes <- df_MergeAcc[!(duplicated(df_MergeAcc$Accession)),]
-#define rows with missing biomart-identified V4 accessions
-df_MergeAcc_NoDupes_missings <- df_MergeAcc_NoDupes[is.na(df_MergeAcc_NoDupes$maizegdb),]
+```{r Merge bm accessions back to df}
+df_NoDecoys_Biomart <- merge.data.frame(df_NoDecoys, AccConv, by.x = "RefSeqPep", by.y = "refseq_peptide", all=T)
 ```
-###For the proteins missing a biomart-identified V4 accession above, try to pull an accession using epost/efetch 
-```{R}
+
+###Use the epost/efetch functions written by Laura to pull maizegdb accessions from xml as well
+```{r Create GI vector}
 options(stringsAsFactors = FALSE)
-set.seed(586)
+
 require(reutils)
 require(readr)
 require(XML)
 
 #get GI accessions
-giAccessions<-df_MergeAcc_NoDupes_missings$Accession
+giAccessions<-PrevSL_trim$GI
 #remove gi accessions with alphas AKA nonconvertible
 giAccessions<-giAccessions[-grep(giAccessions, pattern = "[a-zA-Z]")]
 ```
+```{r}
+giAccessions <- giAccessions[1:9196]
+```
 
-##Fetch entrez ID for each GI
-```{R}
+
+#if re-running this, delete old copy of efetch.txt from file first
+```{r epost, efetch}
 #first, convert GI to UID
 #because more than 500, need to use epost first
 p <- epost(giAccessions, db = "protein")
 #efetch genpept file format for each UID, save to text file (requirement for epost>500)
-efetch(p, db="protein",retmode = "text", rettype="gp", outfile = "output.txt")
+efetch(p, db="protein",retmode = "text", rettype="gp", outfile = "efetch.txt")
+```
+##Pause a couple seconds while the efetch.txt file synchs to cloud, then continue:
+```{r UID vec}
 #read in UID text
-UIDVec<-read.delim(file="output.txt", header = FALSE)
+UIDVec<-read.delim(file="efetch.txt", header = FALSE)
+```
+
+```{r}
 #convert to vector
 UIDVec<-UIDVec[,1]
-#get gene IDs from full flat file
-UIDVec<-UIDVec[grep(UIDVec, pattern="GeneID")]
-#gsub out "GeneID:" to get accession number
-UIDVec<-gsub(UIDVec, pattern=".*:", replacement = "")
-#check that there is a UID for each GI
-length(UIDVec)==length(giAccessions)
 ```
-##Now, convert UID to ZM accession
-```{R}
+
+```{r}
+#get gene IDs from full flat file
+UIDVec2<-UIDVec[grep(UIDVec, pattern="GeneID")]
+#gsub out "GeneID:" to get accession number
+UIDVec2<-gsub(UIDVec2, pattern=".*:", replacement = "")
+#check that there is a UID for each GI
+length(UIDVec2)==length(giAccessions)
+```
+
+
+```{r UID to Zm}
 #since >500, need to use epost
 #loop across total number of batches of 500
 #post to epost, fetch each XML, create conversion table
 #get number of batches
-batches<-seq(1:ceiling(length(UIDVec)/500))
+batches<-seq(1:ceiling(length(UIDVec2)/200))
 batchEnd<-0
 #create empty df
 NCBIConvert<-NULL
 #loop across batches
 for(i in 1:length(batches)){
   batchStart<-batchEnd+1
-  if(i<length(batches)){batchEnd<-batchEnd+500}else(batchEnd<-length(UIDVec))
+  if(i<length(batches)){batchEnd<-batchEnd+200}else(batchEnd<-length(UIDVec2))
   print(batchEnd)
-  f<-epost(UIDVec[batchStart:batchEnd], db="gene")
+  f<-epost(UIDVec2[batchStart:batchEnd], db="gene")
   allXML2<-content(efetch(f, db="gene", retmode="xml"), as="xml")
   #pull out gene reference locus tag, if exists, if not, return "NA"
   dbxrefs1<-as.list(xpathApply(allXML2,"//Gene-ref", function(x) {
@@ -139,160 +167,548 @@ for(i in 1:length(batches)){
               }))
   #turn into character vector
   dbxrefs2<-unlist(dbxrefs2)
-  #Get NCBI annotation "name" for each gene
-  dbxrefs3<-as.list(xpathApply(allXML2,"//Gene-ref",function(x) {
-             if("Gene-ref_desc" %in% names(x)){xmlValue(x[["Gene-ref_desc"]])}
-             else {NA}
-              }))
-
-  #turn into character vector
-  dbxrefs3<-unlist(dbxrefs3)
   
   #check that original gi length == number of XML entries efetched
-  500==length(dbxrefs2)
+  200==length(dbxrefs2)
   #check that number of Zm accessions matches number of gi accessions
-  500==length(dbxrefs1)
+  200==length(dbxrefs1)
 
   #put together
-  tmp<-cbind(giAccessions[batchStart:batchEnd], dbxrefs2, dbxrefs1, dbxrefs3)
+  tmp<-cbind(giAccessions[batchStart:batchEnd], dbxrefs2, dbxrefs1)
   NCBIConvert<-rbind(NCBIConvert, tmp)
 }
 #rename columns
-colnames(NCBIConvert)<-c("gi Acc", "UID Acc", "Accession", "Annotation")
-#write csv
-#get date
-date<-Sys.Date()
-write.csv(NCBIConvert, file = "NCBIConvert_MissingAcc.csv")
+colnames(NCBIConvert)<-c("GI", "UID", "maizegdb.epost")
+
+NCBIConvert2 <- as.data.frame(NCBIConvert)
+
+#remove missing maizegdbid columns
+NCBIConvert2 <- NCBIConvert2[!(NCBIConvert2$maizegdb.epost=="NA"),]
+#Print stats
+print(paste0("Input numeric GIs with a corresponding numeric UID = ",length((NCBIConvert2$GI))))
+print(paste0("Unique MaizeGDB IDs returned = ",length(unique(NCBIConvert2$maizegdb.epost))))
+```
+
+```{r Merge Acc Conversion back with Data}
+df_NoDecoys_Biomart_epost <- merge.data.frame(df_NoDecoys_Biomart, NCBIConvert2, by.x = "Accession", by.y = "GI", all=T)
+
+##make new column for complete V4 accessions
+#choose the epost ID if available
+df_NoDecoys_Biomart_epost$V4 <- df_NoDecoys_Biomart_epost$maizegdb.epost
+#if no epost ID, choose the 1st biomart ID
+df_NoDecoys_Biomart_epost$V4[is.na(df_NoDecoys_Biomart_epost$V4)]<- df_NoDecoys_Biomart_epost$maizegdb.bm.1[is.na(df_NoDecoys_Biomart_epost$V4)]
+#if no epost or biomart ID, choose the GI
+df_NoDecoys_Biomart_epost$V4[is.na(df_NoDecoys_Biomart_epost$V4)]<- df_NoDecoys_Biomart_epost$Accession[is.na(df_NoDecoys_Biomart_epost$V4)]
+```
+
+```{r Merge Acc Conversion back with PrevSL_trim Data}
+PrevSL_trim_epost <- merge.data.frame(PrevSL_trim, NCBIConvert2, by.x = "GI", by.y = "GI", all=T)
+
+##make new column for complete V4 accessions
+#choose the epost ID if available
+PrevSL_trim_epost$V4 <- PrevSL_trim_epost$maizegdb.epost
+```
+
+```{r Save df_NoDecoys_Biomart_epost RDS}
+saveRDS(df_NoDecoys_Biomart_epost, "df_NoDecoys_Biomart_epost")
+```
+
+```{r}
+saveRDS(PrevSL_trim_epost, "PrevSL_trim_epost")
+```
+
+########### Re-start here after cleared environment
+```{r Read df_NoDecoys_Biomart_epost RDS as DF}
+DF <- readRDS("df_NoDecoys_Biomart_epost")
+
+DF<- DF[,c(1,2,42,44,18,3:12)]
+colnames(DF)<- c("GI", "RefSeqPep", "UID", "V4", "Protein", "b731", "b732", "b733", "mo171", "mo172", "bm1", "bm2", "acs1", "acs2", "acs3")
+```
+
+
+
+```{r}
+PrevSL_trim_epost2 <- readRDS("PrevSL_trim_epost")
+```
+
+
+
+```{r}
+BMgeomean <- function(df){
+  x <- NULL
+  for(i in 1:nrow(df)){
+    v <- as.numeric(df[i, 17:18])
+    gm <- geoMean(v, na.rm = T)
+    x[i]<-gm
+  }
+  x
+}
+
+PrevSL_BMgeomean <- function(df){
+  x <- NULL
+  for(i in 1:nrow(df)){
+    v <- as.numeric(df[i, 18:20])
+    gm <- geoMean(v, na.rm = T)
+    x[i]<-gm
+  }
+  x
+}
+
+ACSgeomean <- function(df){
+  x <- NULL
+  for(i in 1:nrow(df)){
+    v <- as.numeric(df[i, 19:21])
+    gm <- geoMean(v, na.rm = T)
+    x[i]<-gm
+  }
+  x
+}
+```
+
+```{r Set mp, bm/mp, Avgs, and SDS}
+DF$mp1 <- rowMeans(DF[,c(6,9)])
+
+DF$bm1.mp1 <- DF$bm1/DF$mp1
+DF$bm2.mp1 <- DF$bm2/DF$mp1
+
+DF$acs1.b731 <- DF$acs1/DF$b731
+DF$acs2.b732 <- DF$acs2/DF$b732
+DF$acs3.b733 <- DF$acs3/DF$b733
+
+DF$avg.bm.mp <- BMgeomean(DF)
+DF$avg.acs.b73 <- ACSgeomean(DF)
+
+DF$sds.bm.mp <- rowSds(as.matrix(DF[,17:18]), na.rm = T)
+DF$sds.acs.b73 <- rowSds(as.matrix(DF[,19:21]), na.rm = T)
+```
+
+```{r Read in Previous SL data}
+PrevSL <- read.csv("CSVs/Seedling Leaf TMT10 030419.csv", stringsAsFactors = F)
+PrevSL_AHP10 <- read.csv("CSVs/PreviousAnalysis/SL_AHP10.csv", stringsAsFactors = F)
+PrevSL_BLP10 <- read.csv("CSVs/PreviousAnalysis/SL_BLP10.csv", stringsAsFactors = F)
 ```
 ```{r}
-df_MergeAcc_NoDupes_merge <- merge.data.frame(df_MergeAcc_NoDupes, NCBIConvert[,c(1,3)], by.x = "Accession", by.y = "gi Acc", all=T)
-
-df_MergeAcc_NoDupes_merge$maizegdb[is.na(df_MergeAcc_NoDupes_merge$maizegdb)]<-df_MergeAcc_NoDupes_merge$Accession.y[is.na(df_MergeAcc_NoDupes_merge$maizegdb)]
-
-df_MergeAcc_NoDupes_merge_fixed <- df_MergeAcc_NoDupes_merge[,c(2:17,1,18:28)]
-
-#Since the remaining NAs are decoy hits, remove them:
-df_MergeAcc_NoDupes_merge_fixed_NoDecoys <- df_MergeAcc_NoDupes_merge_fixed[!(is.na(df_MergeAcc_NoDupes_merge_fixed$maizegdb)),]
+PrevSL_trim_epost2$b731[PrevSL_trim_epost2$b731==0]<-NA
+PrevSL_trim_epost2$b732[PrevSL_trim_epost2$b732==0]<-NA
+PrevSL_trim_epost2$b733[PrevSL_trim_epost2$b733==0]<-NA
+PrevSL_trim_epost2$mo171[PrevSL_trim_epost2$mo171==0]<-NA
+PrevSL_trim_epost2$mo172[PrevSL_trim_epost2$mo172==0]<-NA
+PrevSL_trim_epost2$mo173[PrevSL_trim_epost2$mo173==0]<-NA
+PrevSL_trim_epost2$bm1[PrevSL_trim_epost2$bm1==0]<-NA
+PrevSL_trim_epost2$bm2[PrevSL_trim_epost2$bm2==0]<-NA
+PrevSL_trim_epost2$bm3[PrevSL_trim_epost2$bm3==0]<-NA
 ```
 ```{r}
-#Save data
-saveRDS(df_MergeAcc_NoDupes_merge_fixed_NoDecoys, "df_MergeAcc_NoDupes_merge_fixed_NoDecoys")
+PrevSL_trim_epost2$mp1 <- rowMeans(PrevSL_trim_epost2[,c(3,6)], na.rm = T)
+PrevSL_trim_epost2$mp2 <- rowMeans(PrevSL_trim_epost2[,c(4,7)], na.rm = T)
+PrevSL_trim_epost2$mp3 <- rowMeans(PrevSL_trim_epost2[,c(5,8)], na.rm = T)
+
+PrevSL_trim_epost2$bm1.mp1 <- PrevSL_trim_epost2$bm1/PrevSL_trim_epost2$mp1
+PrevSL_trim_epost2$bm2.mp2 <- PrevSL_trim_epost2$bm2/PrevSL_trim_epost2$mp2
+PrevSL_trim_epost2$bm3.mp3 <- PrevSL_trim_epost2$bm3/PrevSL_trim_epost2$mp3
 ```
-####Re-start here
+
 ```{r}
-#load data
-df_MergeAcc_NoDupes_merge_fixed_NoDecoys <-readRDS("df_MergeAcc_NoDupes_merge_fixed_NoDecoys")
+PrevSL_trim_epost2$avg.bm.mp <- PrevSL_BMgeomean(PrevSL_trim_epost2)
+
+PrevSL_trim_epost2$sds.bm.mp <- rowSds(as.matrix(PrevSL_trim_epost2[,18:20]), na.rm = T)
+```
+
+```{r write table PrevSL l2fc for Corn Cyc analyses}
+write.table(na.omit(PrevSL_trim_epost2[,c(14,23)]), "Prot_SL.txt", sep="\t", row.names = F, col.names = F)
+```
+
+```{r Subset to sig, above, and below}
+DF.acs.sig <- DF[(DF$sds.acs.b73<0.1),]
+DF.bm.sig <- DF[(DF$sds.bm.mp<0.1),]
+
+DF.acs.sig.10above <- DF.acs.sig[(DF.acs.sig$avg.acs.b73>1.1),]
+DF.bm.sig.10above <- DF.bm.sig[(DF.bm.sig$avg.bm.mp>1.1),]
+
+DF.acs.sig.10below <- DF.acs.sig[(DF.acs.sig$avg.acs.b73<0.9),]
+DF.bm.sig.10below <- DF.bm.sig[(DF.bm.sig$avg.bm.mp<0.9),]
+```
+```{r Subset to sig, above, and below}
+PrevSL_trim_epost2.bm.sig <- PrevSL_trim_epost2[(PrevSL_trim_epost2$sds.bm.mp<0.1),]
+PrevSL_trim_epost2.bm.sig.10above <- PrevSL_trim_epost2.bm.sig[(PrevSL_trim_epost2.bm.sig$avg.bm.mp>1.1),]
+PrevSL_trim_epost2.bm.sig.10below <- PrevSL_trim_epost2.bm.sig[(PrevSL_trim_epost2.bm.sig$avg.bm.mp<0.9),]
+```
+
+```{r calculate Log2(fold change)}
+DF$avg.bm.mp.l2fc <- log2(DF$avg.bm.mp)
+DF$avg.acs.b73.l2fc <- log2(DF$avg.acs.b73)
+DF$bm1.mp1.l2fc <- log2(DF$bm1.mp1)
+DF$bm2.mp1.l2fc <- log2(DF$bm2.mp1)
+DF$acs1.b731.l2fc <- log2(DF$acs1.b731)
+DF$acs2.b732.l2fc <- log2(DF$acs2.b732)
+DF$acs3.b733.l2fc <- log2(DF$acs3.b733)
 ```
 
 
-
-
-```{r FunctionsFor_Avg_ID_Ttes}
-B73avg <-  function(csv){rowMeans(csv[,2:4], na.rm = TRUE)}
-
-Mo17avg <-  function(csv){rowMeans(csv[,5:6], na.rm = TRUE)}
-
-MPavg <-  function(csv){rowMeans(csv[,2:6], na.rm = TRUE)}
-
-Hybavg <-  function(csv){rowMeans(csv[,7:8], na.rm = TRUE)}
-
-ACSavg <-  function(csv){rowMeans(csv[,9:11], na.rm = TRUE)}
-
-
-b73_ttest <- function(csv){
-  result <- NULL
-  for(i in 1:(nrow(csv))){
-  b73v = (as.numeric(csv[i, 2:4]))
-  hybv = (as.numeric(csv[i, 7:8]))
-  t_test <- t.test(b73v, hybv, var.equal = TRUE)
-  pval <- t_test$p.value
-  result[i] <- pval
-  }
-  result
-}
-
-b73_acs_ttest <- function(csv){
-  result <- NULL
-  for(i in 1:(nrow(csv))){
-  b73v = (as.numeric(csv[i, 2:4]))
-  acsv = (as.numeric(csv[i, 9:11]))
-  t_test <- t.test(b73v, acsv, var.equal = TRUE)
-  pval <- t_test$p.value
-  result[i] <- pval
-  }
-  result
-}
-
-mo17_ttest <- function(csv){
-  result <- NULL
-  for(i in 1:(nrow(csv))){
-  mo17v = (as.numeric(csv[i, 5:6]))
-  hybv = (as.numeric(csv[i, 7:8]))
-  t_test <- t.test(mo17v, hybv, var.equal = TRUE)
-  pval <- t_test$p.value
-  result[i] <- pval
-  }
-  result
-}
-
-HtoP_ttest <- function(csv){
-  result <- NULL
-  for(i in 1:(nrow(csv))){
-  mo17v = (as.numeric(csv[i, 5:6]))
-  b73v = (as.numeric(csv[i, 2:3]))
-  parentv = rowMeans(cbind(mo17v, b73v))
-  hybv = (as.numeric(csv[i, 7:8]))
-  t_test <- t.test(parentv, hybv, var.equal = TRUE)
-  pval <- t_test$p.value
-  result[i] <- pval
-  }
-  result
-}
-
+```{r calculate Log2(fold change)}
+PrevSL_trim_epost2$avg.bm.mp.l2fc <- log2(PrevSL_trim_epost2$avg.bm.mp)
+PrevSL_trim_epost2$bm1.mp1.l2fc <- log2(PrevSL_trim_epost2$bm1.mp1)
+PrevSL_trim_epost2$bm2.mp2.l2fc <- log2(PrevSL_trim_epost2$bm2.mp2)
+PrevSL_trim_epost2$bm3.mp3.l2fc <- log2(PrevSL_trim_epost2$bm3.mp3)
 ```
 
-```{r DF_function}
-DF <- function(csv){
-  df1 <- data.frame("B73avg"=B73avg(csv), "Mo17avg"=Mo17avg(csv), "ACSavg"=ACSavg(csv), "HybAvg"=Hybavg(csv), "ID"=csv$maizegdb, "Protein"=csv$Protein, stringsAsFactors = F)
-  df2 <- df1[(grep("Zm00", df1$ID)),]
-  df2
-}
+```{r Subset without duplicate UIDs for KEGG}
+DF_NoDupUID <- DF[!(duplicated(DF$UID) | is.na(DF$UID)),]
 
-DF_HybSigDif <- function(csv){
-  df1 <- data.frame("B73avg"=B73avg(csv), "Mo17avg"=Mo17avg(csv),"MPavg"=MPavg(csv), "ACSavg"=ACSavg(csv), "HybAvg"=Hybavg(csv), "HtoP_ttest"=HtoP_ttest(csv), "ID"=csv$maizegdb, "Protein"=csv$Protein, stringsAsFactors = F)
-  df2 <- df1[(df1$HtoP_ttest<0.05),]
-df2
-}
+nrow(DF)
+nrow(DF_NoDupUID)
+```
 
-DF_ACSSigDif <- function(csv){
-  df1 <- data.frame("B73avg"=B73avg(csv), "Mo17avg"=Mo17avg(csv), "MPavg"=MPavg(csv), "ACSavg"=ACSavg(csv), "HybAvg"=Hybavg(csv), "b73_acs_ttest"=b73_acs_ttest(csv), "ID"=csv$maizegdb,"Protein"=csv$Protein, stringsAsFactors = F)
-  df2 <- df1[(df1$b73_acs_ttest<0.05),]
-df2
+```{r Save l2fc data for CornCyc analysis}
+DF_NoDupUID.txt <- DF_NoDupUID[,c(4,27)]
+write.table(DF_NoDupUID.txt, "Prot_acs.txt", sep="\t", row.names = F, col.names = F)
+```
+
+```{r Subset PrevSL without duplicate UIDs for KEGG}
+PrevSL_trim_epost2_NoDupUID <- PrevSL_trim_epost2[!(duplicated(PrevSL_trim_epost2$UID) | is.na(PrevSL_trim_epost2$UID)),]
+
+nrow(PrevSL_trim_epost2)
+nrow(PrevSL_trim_epost2_NoDupUID)
+```
+
+```{r subset to hyb and acs l2fc DFs for KEGG}
+DF.bm.l2fc <- DF_NoDupUID[,28:29]
+DF.acs.l2fc <- DF_NoDupUID[,30:32]
+
+rownames(DF.bm.l2fc) <- DF_NoDupUID$UID
+rownames(DF.acs.l2fc) <- DF_NoDupUID$UID
+
+#Remove the one row of NA - dont know where this came from (?)
+DF.acs.sig.10below <- DF.acs.sig.10below[!(is.na(DF.acs.sig.10below$GI)),]
+DF.acs.sig.10above <- DF.acs.sig.10above[!(is.na(DF.acs.sig.10above$GI)),]
+```
+
+```{r subset PrevSL to hyb and acs l2fc DFs for KEGG}
+PrevSL_trim_epost2.bm.l2fc <- PrevSL_trim_epost2_NoDupUID[,24:26]
+rownames(PrevSL_trim_epost2.bm.l2fc) <- PrevSL_trim_epost2_NoDupUID$UID
+
+PrevSL_trim_epost2.bm.l2fc<- (na.omit(PrevSL_trim_epost2.bm.l2fc))
+```
+
+```{r Venn Diagrams}
+VennDiagram::venn.diagram(list("BxM"=DF.bm.sig.10above$GI, "acs2/6"=DF.acs.sig.10above$GI), main = "Proteins 10% above expected (sd<0.1)", main.cex = 2, cex=2, cat.cex=1.5, filename = "DF10aboveVenn.png", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(0,0), main.pos = c(0.5,0.95))
+
+VennDiagram::venn.diagram(list("BxM"=DF.bm.sig.10below$GI, "acs2/6"=DF.acs.sig.10below$GI), main = "Proteins 10% below expected (sd<0.1)",main.cex = 2, cex=2, cat.cex=1.5, filename = "DF10belowVenn.png", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(0,0), main.pos = c(0.5,0.95))
+```
+
+```{r Subset DFs to discrete sections of Venn Diagrams}
+DF.bm.AND.acs.sig.10above <- DF.bm.sig.10above[(DF.bm.sig.10above$GI%in%DF.acs.sig.10above$GI),]
+DF.bm.NOT.acs.sig.10above <- DF.bm.sig.10above[!(DF.bm.sig.10above$GI%in%DF.acs.sig.10above$GI),]
+DF.acs.NOT.bm.sig.10above <- DF.acs.sig.10above[!(DF.acs.sig.10above$GI%in%DF.bm.sig.10above$GI),]
+
+DF.bm.AND.acs.sig.10below <- DF.bm.sig.10below[(DF.bm.sig.10below$GI%in%DF.acs.sig.10below$GI),]
+DF.bm.NOT.acs.sig.10below <- DF.bm.sig.10below[!(DF.bm.sig.10below$GI%in%DF.acs.sig.10below$GI),]
+DF.acs.NOT.bm.sig.10below <- DF.acs.sig.10below[!(DF.acs.sig.10below$GI%in%DF.bm.sig.10below$GI),]
+
+#check that we got everything
+(nrow(DF.bm.AND.acs.sig.10above)+nrow(DF.bm.NOT.acs.sig.10above)+nrow(DF.acs.NOT.bm.sig.10above))==(length(unique(c(DF.bm.sig.10above$GI,DF.acs.sig.10above$GI))))
+
+(nrow(DF.bm.AND.acs.sig.10below)+nrow(DF.bm.NOT.acs.sig.10below)+nrow(DF.acs.NOT.bm.sig.10below))==(length(unique(c(DF.bm.sig.10below$GI,DF.acs.sig.10below$GI))))
+```
+
+### KEGG
+## Pathview and GAGE to create KEGG maps
+```{r Define gsets and run gage on acs and hyb}
+zma <- kegg.gsets(species = "zma", id.type = "entrez")
+
+keggres_HYB_DF <- gage(DF.bm.l2fc, gsets = zma$kg.sets, samp = c(1:2), same.dir = T)
+keggres_ACS_DF <- gage(DF.acs.l2fc, gsets = zma$kg.sets, samp = c(1:3), same.dir = T)
+keggres_PrevSL_DF <- gage(PrevSL_trim_epost2.bm.l2fc, gsets = zma$kg.sets, samp = c(1:3), same.dir = T)
+```
+
+
+```{r PVfun}
+PVfun <- function(keggres, foldchangev){
+  dir.create(paste0((deparse(substitute(keggres))), "_",(deparse(substitute(foldchangev))),"/"))
+setwd(paste0((deparse(substitute(keggres))), "_",(deparse(substitute(foldchangev))),"/"))
+keggres_df = as.data.frame(keggres)
+keggres_df_sig = na.omit(keggres_df[(keggres_df$p.val<0.05),])
+
+V = rownames(keggres_df_sig)
+Va = substr(V, start = 1, stop = 8)
+Vb = substr(V, start = 10, stop = 100)
+Vm =cbind(Va, Vb)
+
+for(i in 1:nrow(Vm)){
+  pathview(gene.data=foldchangev, pathway.id=Vm[i,1], species = "zma", out.suffix = (paste0(Vm[i,2], (deparse(substitute(keggres))))))
+  }
 }
 ```
 
+
+```{r}
+PVfun(keggres_PrevSL_DF$greater, PrevSL_trim_epost2.bm.l2fc)
+```
+```{r}
+PVfun(keggres_HYB_DF$greater, DF.bm.l2fc)
+```
+```{r}
+PVfun(keggres_ACS_DF$greater, DF.acs.l2fc)
+```
+```{r}
+PVfun(keggres_PrevSL_DF$less, PrevSL_trim_epost2.bm.l2fc)
+```
+```{r}
+pathview(PrevSL_trim_epost2.bm.l2fc, pathway.id = "zma00010", species = "zma", out.suffix = "keggres_PrevSL_DF$less_Glycolysis")
+```
+
+```{r}
+PVfun(keggres_HYB_DF$less, DF.bm.l2fc)
+```
+```{r}
+PVfun(keggres_ACS_DF$less, DF.acs.l2fc)
+```
+
+```{r Make .png images of KEGG pathway enrichment dataframes}
+keggres_HYB_DF_KEGGdf <- as.data.frame(keggres_HYB_DF$greater)
+keggres_HYB_DF_KEGGdf$KEGG <- rownames(keggres_HYB_DF_KEGGdf)
+keggres_HYB_DF_KEGGdf <- keggres_HYB_DF_KEGGdf[1:6,c(8,1:7)]
+
+png((paste0(c(deparse(substitute(keggres_HYB_DF_KEGGdf.greater))),".png")), height=300, width=1000)
+p<-tableGrob(keggres_HYB_DF_KEGGdf, rows = c())
+grid.arrange(p)
+dev.off()
+
+keggres_ACS_DF_KEGGdf <- as.data.frame(keggres_ACS_DF$greater)
+keggres_ACS_DF_KEGGdf$KEGG <- rownames(keggres_ACS_DF_KEGGdf)
+keggres_ACS_DF_KEGGdf <- keggres_ACS_DF_KEGGdf[1:6,c(9,1:8)]
+
+png((paste0(c(deparse(substitute(keggres_ACS_DF_KEGGdf.greater))),".png")), height=300, width=1000)
+p<-tableGrob(keggres_ACS_DF_KEGGdf, rows = c())
+grid.arrange(p)
+dev.off()
+
+keggres_PrevSL_DF_KEGGdf <- as.data.frame(keggres_PrevSL_DF$greater)
+keggres_PrevSL_DF_KEGGdf$KEGG <- rownames(keggres_PrevSL_DF_KEGGdf)
+keggres_PrevSL_DF_KEGGdf <- keggres_PrevSL_DF_KEGGdf[1:6,c(9,1:8)]
+
+png((paste0(c(deparse(substitute(keggres_PrevSL_DF_KEGGdf.greater))),".png")), height=300, width=1000)
+p<-tableGrob(keggres_PrevSL_DF_KEGGdf, rows = c())
+grid.arrange(p)
+dev.off()
+
+keggres_HYB_DF_KEGGdf <- as.data.frame(keggres_HYB_DF$less)
+keggres_HYB_DF_KEGGdf$KEGG <- rownames(keggres_HYB_DF_KEGGdf)
+keggres_HYB_DF_KEGGdf <- keggres_HYB_DF_KEGGdf[1:10,c(8,1:7)]
+
+png((paste0(c(deparse(substitute(keggres_HYB_DF_KEGGdf.less))),".png")), height=300, width=1000)
+p<-tableGrob(keggres_HYB_DF_KEGGdf, rows = c())
+grid.arrange(p)
+dev.off()
+
+keggres_ACS_DF_KEGGdf <- as.data.frame(keggres_ACS_DF$less)
+keggres_ACS_DF_KEGGdf$KEGG <- rownames(keggres_ACS_DF_KEGGdf)
+keggres_ACS_DF_KEGGdf <- keggres_ACS_DF_KEGGdf[1:10,c(9,1:8)]
+
+png((paste0(c(deparse(substitute(keggres_ACS_DF_KEGGdf.less))),".png")), height=300, width=1000)
+p<-tableGrob(keggres_ACS_DF_KEGGdf, rows = c())
+grid.arrange(p)
+dev.off()
+
+keggres_PrevSL_DF_KEGGdf <- as.data.frame(keggres_PrevSL_DF$less)
+keggres_PrevSL_DF_KEGGdf$KEGG <- rownames(keggres_PrevSL_DF_KEGGdf)
+keggres_PrevSL_DF_KEGGdf <- keggres_PrevSL_DF_KEGGdf[1:6,c(9,1:8)]
+
+png((paste0(c(deparse(substitute(keggres_PrevSL_DF_KEGGdf.less))),".png")), height=300, width=1000)
+p<-tableGrob(keggres_PrevSL_DF_KEGGdf, rows = c())
+grid.arrange(p)
+dev.off()
+```
+```{r}
+CysMetMetabolism_HYB <- pathview(PrevSL_trim_epost2.bm.l2fc, pathway.id = "zma00270", species="zma", out.suffix = "CysMetMetabolism_PrevSL")
+```
+```{r}
+BiosynthesisAAs <- pathview(gene.data = DF.bm.l2fc, pathway.id = "zma01230", species="zma", out.suffix = "BiosynthesisAAs_HYB", keys.align = "y", kegg.native = F, match.data = F, multi.state = T, same.layer = T, cex=0.125, afactor=3, map.null = T, expand.node = T)
+```
+```{r}
+keggview.graph(plot.data.gene = DF.acs.l2fc, path.graph = "zma01230", species="zma", out.suffix = "BiosynthesisAAs_ACS.kvn", node.data = AAxml, is.signal = F)
+```
+
+
+```{r gamer_ReadIn, include=FALSE}
+# Read in Maize GAMER GO dataset, which lists V4 accessions with all associated GO terms (Wimalanathan et al. 2018) downloaded from doi.org/10.7946/P2M925
+#unzip("maize.B73.AGPv4.aggregate.gaf.zip")
+GAMER <- read.delim("maize.B73.AGPv4.aggregate.gaf", sep = "\t", header = FALSE, stringsAsFactors = F)
+colnames(GAMER) <- c("db", "db_object_id", "db_object_symbol", "qualifier", "term_accession", "db_reference", "evidence_code", "with", "aspect", "db_object_name", "db_object_synonym", "db_object_type", "taxon", "date", "assigned_by", "annotation_extension", "gene_product_form_id")
+
+gamer <- GAMER[-(1:2),]
+gamer$Term <- Term(as.character(gamer$term_accession))
+
+#Make gamer dataframe trimmed to only proteins detected in this run to use as background control set for enrichment analyses (input for "GamerCut" in GOanalysisGodata function)
+GamerCut <- gamer[(gamer$db_object_id %in% DF$V4),]
+GamerCut_PrevSL <- gamer[(gamer$db_object_id %in% PrevSL$Accessions),]
+```
+
+```{r define GO:photosynthesis genes and GO:ribosome genes}
+go.photosynthesis <- na.omit(gamer[(gamer$Term=="photosynthesis"),])
+accessions.go.photosynthesis <- go.photosynthesis$db_object_id
+
+go.ribosome <- na.omit(gamer[(gamer$Term=="ribosome"),])
+accessions.go.ribosome <- go.ribosome$db_object_id
+```
+
+```{r GOanalysisGOdata function}
+## Build GOdata object
+# EnrichedDF = DF with V4 accessions for GOIs in column named "V4"
+# GamerCut = GAMER dataframe trimmed to control set
+# ont = "BP", "MF", or "CC"
+GOanalysisGodata <- function(EnrichedDF, GamerCut, ont, nodesize = 1){
+  gene2GO_TissueCut <- split((as.character(GamerCut$term_accession)),GamerCut$db_object_id)
+  gene2GOb_TissueCut <- gene2GO_TissueCut[-2]
+  str(head(gene2GOb_TissueCut))
+  geneNames_tissuecut <- names(gene2GOb_TissueCut)
+  myInterestingGenes <- EnrichedDF$V4
+  myInterestingGenes <- na.omit(myInterestingGenes)
+  geneList <- factor(as.integer(geneNames_tissuecut %in% myInterestingGenes))
+  names(geneList) <- geneNames_tissuecut
+  GOdata <- new("topGOdata", ontology = ont, allGenes = geneList, annot = annFUN.gene2GO, nodeSize=nodesize, gene2GO = gene2GOb_TissueCut)
+  GOdata
+}
+```
+```{r GOanalysisDF function}
+## GO analysis function to generate dataframe summary of top 20 of GO terms
+# GOdata = Godata object (output of GoanalysisGodata function)
+
+GOanalysisDF <- function(GOdata){
+resultFis <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
+test.statF <- new("classicCount", testStatistic = GOFisherTest, name = "Fisher test")
+resultFisher <- getSigGroups(GOdata, test.statF)
+test.statKS <- new("classicScore", testStatistic = GOKSTest, name = "KS tests")
+resultKS <- getSigGroups(GOdata, test.statKS)
+test.statRW <- new("weightCount", testStatistic = GOFisherTest, name = "Fisher test", sigRatio = "ratio")
+resultWeight <- getSigGroups(GOdata, test.statRW)
+DF <- GenTable(GOdata, classic = resultFis, KS = resultKS, weight = resultWeight, orderBy = "classic", ranksOf = "classic", topNodes = 100)
+DF
+}
+```
+
+```{r GOanalysisDF.list function}
+GOanalysisDF.list <- function(l){
+  dir.create("GOdata.DFs/")
+  setwd("GOdata.DFs/")
+  l2 <- list(NULL)
+  for(i in 1:length(l)){
+   DF <- GOanalysisDF(l[[i]])
+  png((paste0((names(l[i])), ".png")), height = 300, width=900)
+  p<-tableGrob(DF[1:10,], rows = c())
+  grid.arrange(p)
+  dev.off()
+  l2[[i]]<-DF
+  }
+  names(l2)<- names(l)
+  l2
+}
+```
+
+```{r GOanalysisMap function}
+## GO analysis function to build map of top GO terms, output to pdf
+# GOdata = Godata object (output of GoanalysisGodata function)
+GOanalysisMap <- function(GOdata, nodes=10){
+  resultFis <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
+  printGraph(GOdata, resultFis, firstSigNodes = nodes, fn.prefix = (paste0(c(deparse(substitute(GOdata))),".png")), useInfo = "all", pdfSW = TRUE)
+}
+```
+
+```{r GO analyses}
+#above
+DF.acs.sig.10above.godataBP <- GOanalysisGodata(DF.acs.sig.10above, GamerCut, "BP")
+DF.bm.sig.10above.godataBP <- GOanalysisGodata(DF.bm.sig.10above, GamerCut, "BP")
+
+DF.acs.sig.10above.godataCC <- GOanalysisGodata(DF.acs.sig.10above, GamerCut, "CC")
+DF.bm.sig.10above.godataCC <- GOanalysisGodata(DF.bm.sig.10above, GamerCut, "CC")
+
+DF.acs.sig.10above.godataMF <- GOanalysisGodata(DF.acs.sig.10above, GamerCut, "MF")
+DF.bm.sig.10above.godataMF <- GOanalysisGodata(DF.bm.sig.10above, GamerCut, "MF")
+
+#below
+DF.acs.sig.10below.godataBP <- GOanalysisGodata(DF.acs.sig.10below, GamerCut, "BP")
+DF.bm.sig.10below.godataBP <- GOanalysisGodata(DF.bm.sig.10below, GamerCut, "BP")
+
+DF.acs.sig.10below.godataCC <- GOanalysisGodata(DF.acs.sig.10below, GamerCut, "CC")
+DF.bm.sig.10below.godataCC <- GOanalysisGodata(DF.bm.sig.10below, GamerCut, "CC")
+
+DF.acs.sig.10below.godataMF <- GOanalysisGodata(DF.acs.sig.10below, GamerCut, "MF")
+DF.bm.sig.10below.godataMF <- GOanalysisGodata(DF.bm.sig.10below, GamerCut, "MF")
+```
+```{r}
+GOdata.list <- list("DF.acs.sig.10above.godataBP"=DF.acs.sig.10above.godataBP, "DF.bm.sig.10above.godataBP"=DF.bm.sig.10above.godataBP, "DF.acs.sig.10above.godataCC"=DF.acs.sig.10above.godataCC, "DF.bm.sig.10above.godataCC"=DF.bm.sig.10above.godataCC, "DF.acs.sig.10above.godataMF"=DF.acs.sig.10above.godataMF,"DF.bm.sig.10above.godataMF"=DF.bm.sig.10above.godataMF,
+"DF.acs.sig.10below.godataBP"=DF.acs.sig.10below.godataBP, "DF.bm.sig.10below.godataBP"=DF.bm.sig.10below.godataBP, "DF.acs.sig.10below.godataCC"=DF.acs.sig.10below.godataCC, "DF.bm.sig.10below.godataCC"=DF.bm.sig.10below.godataCC, "DF.acs.sig.10below.godataMF"=DF.acs.sig.10below.godataMF,"DF.bm.sig.10below.godataMF"=DF.bm.sig.10below.godataMF)
+#Save GOdata list
+saveRDS(GOdata.list, "GOdata.list")
+#Build GO term enrichment tables
+GO.DF.l <- GOanalysisDF.list(GOdata.list)
+#Save list of GO term enrichment tables
+saveRDS(GO.DF.l, "GO.DF.l")
+```
+##### Read back in analyzed data
+```{r}
+#Load back in GOdata list and GO term enrichment table list
+GOdata.list <- readRDS("GOdata.list")
+GO.DF.l <- readRDS("GO.DF.l")
+```
+
+```{r GO analysis venn diagram sections}
+#above
+DF.bm.AND.acs.sig.10above_GodataBP <- GOanalysisGodata(DF.bm.AND.acs.sig.10above, GamerCut, "BP")
+DF.bm.NOT.acs.sig.10above_GodataBP <- GOanalysisGodata(DF.bm.NOT.acs.sig.10above, GamerCut, "BP")
+DF.acs.NOT.bm.sig.10above_GodataBP <- GOanalysisGodata(DF.acs.NOT.bm.sig.10above, GamerCut, "BP")
+
+DF.bm.AND.acs.sig.10above_GodataCC <- GOanalysisGodata(DF.bm.AND.acs.sig.10above, GamerCut, "CC")
+DF.bm.NOT.acs.sig.10above_GodataCC <- GOanalysisGodata(DF.bm.NOT.acs.sig.10above, GamerCut, "CC")
+DF.acs.NOT.bm.sig.10above_GodataCC <- GOanalysisGodata(DF.acs.NOT.bm.sig.10above, GamerCut, "CC")
+
+DF.bm.AND.acs.sig.10above_GodataMF <- GOanalysisGodata(DF.bm.AND.acs.sig.10above, GamerCut, "MF")
+DF.bm.NOT.acs.sig.10above_GodataMF <- GOanalysisGodata(DF.bm.NOT.acs.sig.10above, GamerCut, "MF")
+DF.acs.NOT.bm.sig.10above_GodataMF <- GOanalysisGodata(DF.acs.NOT.bm.sig.10above, GamerCut, "MF")
+
+#below
+DF.bm.AND.acs.sig.10below_GodataBP <- GOanalysisGodata(DF.bm.AND.acs.sig.10below, GamerCut, "BP")
+DF.bm.NOT.acs.sig.10below_GodataBP <- GOanalysisGodata(DF.bm.NOT.acs.sig.10below, GamerCut, "BP")
+DF.acs.NOT.bm.sig.10below_GodataBP <- GOanalysisGodata(DF.acs.NOT.bm.sig.10below, GamerCut, "BP")
+
+DF.bm.AND.acs.sig.10below_GodataCC <- GOanalysisGodata(DF.bm.AND.acs.sig.10below, GamerCut, "CC")
+DF.bm.NOT.acs.sig.10below_GodataCC <- GOanalysisGodata(DF.bm.NOT.acs.sig.10below, GamerCut, "CC")
+DF.acs.NOT.bm.sig.10below_GodataCC <- GOanalysisGodata(DF.acs.NOT.bm.sig.10below, GamerCut, "CC")
+
+DF.bm.AND.acs.sig.10below_GodataMF <- GOanalysisGodata(DF.bm.AND.acs.sig.10below, GamerCut, "MF")
+DF.bm.NOT.acs.sig.10below_GodataMF <- GOanalysisGodata(DF.bm.NOT.acs.sig.10below, GamerCut, "MF")
+DF.acs.NOT.bm.sig.10below_GodataMF <- GOanalysisGodata(DF.acs.NOT.bm.sig.10below, GamerCut, "MF")
+
+GOdata.venn.list <- list("DF.bm.AND.acs.sig.10above_GodataBP"=DF.bm.AND.acs.sig.10above_GodataBP,"DF.bm.NOT.acs.sig.10above_GodataBP"=DF.bm.NOT.acs.sig.10above_GodataBP, "DF.acs.NOT.bm.sig.10above_GodataBP"=DF.acs.NOT.bm.sig.10above_GodataBP, "DF.bm.AND.acs.sig.10above_GodataCC"=DF.bm.AND.acs.sig.10above_GodataCC, "DF.bm.NOT.acs.sig.10above_GodataCC"=DF.bm.NOT.acs.sig.10above_GodataCC, "DF.acs.NOT.bm.sig.10above_GodataCC"=DF.acs.NOT.bm.sig.10above_GodataCC, "DF.bm.AND.acs.sig.10above_GodataMF"=DF.bm.AND.acs.sig.10above_GodataMF, "DF.bm.NOT.acs.sig.10above_GodataMF"=DF.bm.NOT.acs.sig.10above_GodataMF, "DF.acs.NOT.bm.sig.10above_GodataMF"=DF.acs.NOT.bm.sig.10above_GodataMF, "DF.bm.AND.acs.sig.10below_GodataBP"=DF.bm.AND.acs.sig.10below_GodataBP, "DF.bm.NOT.acs.sig.10below_GodataBP"=DF.bm.NOT.acs.sig.10below_GodataBP, "DF.acs.NOT.bm.sig.10below_GodataBP"=DF.acs.NOT.bm.sig.10below_GodataBP, "DF.bm.AND.acs.sig.10below_GodataCC"=DF.bm.AND.acs.sig.10below_GodataCC, "DF.bm.NOT.acs.sig.10below_GodataCC"=DF.bm.NOT.acs.sig.10below_GodataCC, "DF.acs.NOT.bm.sig.10below_GodataCC"=DF.acs.NOT.bm.sig.10below_GodataCC, "DF.bm.AND.acs.sig.10below_GodataMF"=DF.bm.AND.acs.sig.10below_GodataMF, "DF.bm.NOT.acs.sig.10below_GodataMF"=DF.bm.NOT.acs.sig.10below_GodataMF, "DF.acs.NOT.bm.sig.10below_GodataMF"=DF.acs.NOT.bm.sig.10below_GodataMF)
+#Save GOdata list
+saveRDS(GOdata.venn.list, "GOdata.venn.list")
+#Build GO term enrichment tables
+GO.venn.DF.l <- GOanalysisDF.list(GOdata.venn.list)
+#Save list of GO term enrichment tables
+saveRDS(GO.venn.DF.l, "GO.venn.DF.l")
+```
+##### Read back in analyzed data
+```{r}
+#Load back in GOdata list and GO term enrichment table list
+GOdata.venn.list <- readRDS("GOdata.venn.list")
+GO.venn.DF.l <- readRDS("GO.venn.DF.l")
+```
+
+
+### Distance matrices to analyze bio replicates
 ```{r}
 #Build distance matrix of bio reps
-df_MergeAcc_NoDupes_dist_bioreps <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
-df_MergeAcc_NoDupes_dist_bioreps <- df_MergeAcc_NoDupes_dist_bioreps[,c(2:11)]
-colnames(df_MergeAcc_NoDupes_dist_bioreps)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
-df_MergeAcc_NoDupes_dist_bioreps <- t(df_MergeAcc_NoDupes_dist_bioreps)
-dist_bioreps <- dist(df_MergeAcc_NoDupes_dist_bioreps, method = "euclidean")
+df_NoDecoys_Biomart_epost_bioreps <- df_NoDecoys_Biomart_epost
+df_NoDecoys_Biomart_epost_bioreps <- df_NoDecoys_Biomart_epost_bioreps[,c(3:12)]
+colnames(df_NoDecoys_Biomart_epost_bioreps)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
+df_NoDecoys_Biomart_epost_bioreps <- t(df_NoDecoys_Biomart_epost_bioreps)
+dist_bioreps <- dist(df_NoDecoys_Biomart_epost_bioreps, method = "euclidean")
 dist_bioreps
-```
-```{r}
-#Build distance matrix of bio reps
-df_MergeAcc_NoDupes_dist_bioreps_100k <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
-df_MergeAcc_NoDupes_dist_bioreps_100k <- df_MergeAcc_NoDupes_dist_bioreps_100k[(df_MergeAcc_NoDupes_dist_bioreps_100k$Normalized_129N.E..SpectrumMill.msdataSM.PGRP2016.ACS2.6.B73x3.Mo17x2.BMx2.ACSx3.TMT10.100ug.2D.093019.QE1>100000),]
-df_MergeAcc_NoDupes_dist_bioreps_100k<- df_MergeAcc_NoDupes_dist_bioreps_100k[,c(2:11)]
-colnames(df_MergeAcc_NoDupes_dist_bioreps_100k)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
-df_MergeAcc_NoDupes_dist_bioreps_100k <- t(df_MergeAcc_NoDupes_dist_bioreps_100k)
-
 ```
 
 ```{r}
 #Plot distance matrix - bio reps
-res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps, stand = F, method = "euclidian")
+res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
 
@@ -307,18 +723,18 @@ plot(hcd_bioreps, type = "rectangle", ylab = "height")
 ```
 ```{r}
 #Build distance matrix of bio reps
-df_MergeAcc_NoDupes_dist_bioreps_plastid <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
-df_MergeAcc_NoDupes_dist_bioreps_plastid <- df_MergeAcc_NoDupes_dist_bioreps_plastid[grep("NP_04",df_MergeAcc_NoDupes_dist_bioreps_plastid$Protein),]
-df_MergeAcc_NoDupes_dist_bioreps_plastid <- df_MergeAcc_NoDupes_dist_bioreps_plastid[,c(2:11)]
-colnames(df_MergeAcc_NoDupes_dist_bioreps_plastid)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
-df_MergeAcc_NoDupes_dist_bioreps_plastid <- t(df_MergeAcc_NoDupes_dist_bioreps_plastid)
-dist_bioreps_plastid <- dist(df_MergeAcc_NoDupes_dist_bioreps_plastid, method = "euclidean")
+df_NoDecoys_Biomart_epost_bioreps_plastid <- df_NoDecoys_Biomart_epost
+df_NoDecoys_Biomart_epost_bioreps_plastid <- df_NoDecoys_Biomart_epost_bioreps_plastid[grep("NP_04",df_NoDecoys_Biomart_epost_bioreps_plastid$Protein),]
+df_NoDecoys_Biomart_epost_bioreps_plastid <- df_NoDecoys_Biomart_epost_bioreps_plastid[,c(3:12)]
+colnames(df_NoDecoys_Biomart_epost_bioreps_plastid)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
+df_NoDecoys_Biomart_epost_bioreps_plastid <- t(df_NoDecoys_Biomart_epost_bioreps_plastid)
+dist_bioreps_plastid <- dist(df_NoDecoys_Biomart_epost_bioreps_plastid, method = "euclidean")
 dist_bioreps_plastid
 ```
 
 ```{r}
 #Plot distance matrix - bio reps
-res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps_plastid, stand = F, method = "euclidian")
+res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_plastid, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
 ggsave("bioreps_plastid_dist.png")
@@ -334,22 +750,22 @@ plot(hcd_bioreps_plastid, type = "rectangle", ylab = "height")
 
 ```{r}
 #Build distance matrix of bio reps
-df_MergeAcc_NoDupes_dist_bioreps_go.photo<- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
-df_MergeAcc_NoDupes_dist_bioreps_go.photo <- df_MergeAcc_NoDupes_dist_bioreps_go.photo[(df_MergeAcc_NoDupes_dist_bioreps_go.photo$maizegdb%in%accessions.go.photosynthesis),]
-df_MergeAcc_NoDupes_dist_bioreps_go.photo <- df_MergeAcc_NoDupes_dist_bioreps_go.photo[,c(2:11)]
-colnames(df_MergeAcc_NoDupes_dist_bioreps_go.photo)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
-df_MergeAcc_NoDupes_dist_bioreps_go.photo <- t(df_MergeAcc_NoDupes_dist_bioreps_go.photo)
-dist_bioreps_go.photo <- dist(df_MergeAcc_NoDupes_dist_bioreps_go.photo, method = "euclidean")
+df_NoDecoys_Biomart_epost_bioreps_go.photo<- df_NoDecoys_Biomart_epost
+df_NoDecoys_Biomart_epost_bioreps_go.photo <- df_NoDecoys_Biomart_epost_bioreps_go.photo[(df_NoDecoys_Biomart_epost_bioreps_go.photo$V4%in%accessions.go.photosynthesis),]
+df_NoDecoys_Biomart_epost_bioreps_go.photo <- df_NoDecoys_Biomart_epost_bioreps_go.photo[,c(3:12)]
+colnames(df_NoDecoys_Biomart_epost_bioreps_go.photo)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
+df_NoDecoys_Biomart_epost_bioreps_go.photo <- t(df_NoDecoys_Biomart_epost_bioreps_go.photo)
+dist_bioreps_go.photo <- dist(df_NoDecoys_Biomart_epost_bioreps_go.photo, method = "euclidean")
 dist_bioreps_go.photo
 ```
 
 
 ```{r}
 #Plot distance matrix - bio reps
-res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps_go.photo, stand = F, method = "euclidian")
+res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_go.photo, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
-#ggsave("bioreps_nuclear_GO_photo_dist.png")
+ggsave("bioreps_nuclear_GO_photo_dist.png")
 ```
 ```{r}
 #order=(c( "acs.2", "acs.3", "b73.1", "BM.1", "b73.2", "BM.2", "mo17.1", "acs.1", "b73.1", "mo17.2"))
@@ -362,12 +778,12 @@ plot(hcd_bioreps_go.photo, type = "rectangle", ylab = "height")
 
 ```{r}
 #Build distance matrix of bio reps
-df_MergeAcc_NoDupes_dist_bioreps_go.ribosome<- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
-df_MergeAcc_NoDupes_dist_bioreps_go.ribosome <- df_MergeAcc_NoDupes_dist_bioreps_go.ribosome[grep("ribosomal protein",df_MergeAcc_NoDupes_dist_bioreps_go.ribosome$Protein),]
-df_MergeAcc_NoDupes_dist_bioreps_go.ribosome <- df_MergeAcc_NoDupes_dist_bioreps_go.ribosome[,c(2:11)]
-colnames(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
-df_MergeAcc_NoDupes_dist_bioreps_go.ribosome <- t(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome)
-dist_bioreps_go.ribosome <- dist(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome, method = "euclidean", diag=T, upper=T)
+df_NoDecoys_Biomart_epost_bioreps_go.ribosome<- df_NoDecoys_Biomart_epost
+df_NoDecoys_Biomart_epost_bioreps_go.ribosome <- df_NoDecoys_Biomart_epost_bioreps_go.ribosome[grep("ribosomal protein",df_NoDecoys_Biomart_epost_bioreps_go.ribosome$Protein),]
+df_NoDecoys_Biomart_epost_bioreps_go.ribosome <- df_NoDecoys_Biomart_epost_bioreps_go.ribosome[,c(3:12)]
+colnames(df_NoDecoys_Biomart_epost_bioreps_go.ribosome)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
+df_NoDecoys_Biomart_epost_bioreps_go.ribosome <- t(df_NoDecoys_Biomart_epost_bioreps_go.ribosome)
+dist_bioreps_go.ribosome <- dist(df_NoDecoys_Biomart_epost_bioreps_go.ribosome, method = "euclidean", diag=T, upper=T)
 dist_bioreps_go.ribosome
 ```
 ```{r}
@@ -375,9 +791,6 @@ dist_bioreps_go.ribosome.m <- as.matrix(dist_bioreps_go.ribosome)
 dist_bioreps_go.photo.m <- as.matrix(dist_bioreps_go.photo)
 dist_bioreps_plastid.m <- as.matrix(dist_bioreps_plastid)
 dist_bioreps.m <- as.matrix(dist_bioreps)
-```
-```{r}
-df_MergeAcc_NoDupes_dist_bioreps
 ```
 
 ```{r}
@@ -397,9 +810,9 @@ heatmap(dist_bioreps.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm 
 
 ```{r}
 #Plot distance matrix - bio reps
-res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome, stand = F, method = "euclidian")
+res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_go.ribosome, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
-   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = c())
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
 ggsave("bioreps_nuclear_ribosomalprotein_dist.png")
 ```
 ```{r}
@@ -409,826 +822,55 @@ hc_bioreps_go.ribosome<- hclust(dist_bioreps_go.ribosome, method = "complete")
 hcd_bioreps_go.ribosome <- as.dendrogram(hc_bioreps_go.ribosome)
 plot(hcd_bioreps_go.ribosome, type = "rectangle", ylab = "height")
 ```
+
 ```{r}
-#Build distance matrix of bio reps
-df_MergeAcc_NoDupes_dist_bioreps_photo <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
-df_MergeAcc_NoDupes_dist_bioreps_photo <- df_MergeAcc_NoDupes_dist_bioreps_photo[(df_MergeAcc_NoDupes_dist_bioreps_photo$Accession%in%accession.photo),]
-df_MergeAcc_NoDupes_dist_bioreps_photo <- df_MergeAcc_NoDupes_dist_bioreps_photo[,c(2:11)]
-colnames(df_MergeAcc_NoDupes_dist_bioreps_photo)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2", "acs.1", "acs.2", "acs.3")
-df_MergeAcc_NoDupes_dist_bioreps_photo <- t(df_MergeAcc_NoDupes_dist_bioreps_photo)
-dist_bioreps_photo <- dist(df_MergeAcc_NoDupes_dist_bioreps_photo, method = "euclidean")
-dist_bioreps_photo
+df_NoDecoys_Biomart_epost_bioreps_go.photo.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.photo)
+heatmap(df_NoDecoys_Biomart_epost_bioreps_go.photo.t)
 ```
 ```{r}
-#Plot distance matrix - bio reps
-res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps_photo, stand = F, method = "euclidian")
-factoextra::fviz_dist(res.dist_bioreps, 
-   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
-#ggsave("bioreps_photo_dist.png")
-```
-```{r}
-df_MergeAcc_NoDupes_dist_bioreps_go.photo.t <- t(df_MergeAcc_NoDupes_dist_bioreps_go.photo)
-heatmap(df_MergeAcc_NoDupes_dist_bioreps_go.photo.t)
-```
-```{r}
-df_MergeAcc_NoDupes_dist_bioreps_go.ribosome.t <- t(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome)
-heatmap(df_MergeAcc_NoDupes_dist_bioreps_go.ribosome.t)
+df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.ribosome)
+heatmap(df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t)
 ```
 
 ```{r}
-df_MergeAcc_NoDupes_dist_bioreps.t <- t(df_MergeAcc_NoDupes_dist_bioreps)
-heatmap(df_MergeAcc_NoDupes_dist_bioreps.t)
+df_NoDecoys_Biomart_epost_bioreps.t <- t(df_NoDecoys_Biomart_epost_bioreps)
+heatmap(df_NoDecoys_Biomart_epost_bioreps.t)
 ```
 ```{r}
-df_MergeAcc_NoDupes_dist_bioreps_plastid.t <- t(df_MergeAcc_NoDupes_dist_bioreps_plastid)
-heatmap(df_MergeAcc_NoDupes_dist_bioreps_plastid.t)
-```
-
-
-
-```{r}
-df_MergeAcc_NoDupes_dist_bioreps_MPs <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys
-df_MergeAcc_NoDupes_dist_bioreps_MPs <- df_MergeAcc_NoDupes_dist_bioreps_MPs[grep("NP_04",df_MergeAcc_NoDupes_dist_bioreps_MPs$Protein),]
-df_MergeAcc_NoDupes_dist_bioreps_MPs <- df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(2:8)]
+df_NoDecoys_Biomart_epost_bioreps_plastid.t <- t(df_NoDecoys_Biomart_epost_bioreps_plastid)
+heatmap(df_NoDecoys_Biomart_epost_bioreps_plastid.t)
 ```
 ```{r}
-colnames(df_MergeAcc_NoDupes_dist_bioreps_MPs)<- c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "BM.1", "BM.2")
-```
-```{r}
-df_MergeAcc_NoDupes_dist_bioreps_MPs$b1m1 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(1,4)])
-df_MergeAcc_NoDupes_dist_bioreps_MPs$b1m2 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(1,5)])
-df_MergeAcc_NoDupes_dist_bioreps_MPs$b2m1 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(2,4)])
-df_MergeAcc_NoDupes_dist_bioreps_MPs$b3m1 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(3,4)])
-df_MergeAcc_NoDupes_dist_bioreps_MPs$b2m2 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(2,5)])
-df_MergeAcc_NoDupes_dist_bioreps_MPs$b3m2 <- rowMeans(df_MergeAcc_NoDupes_dist_bioreps_MPs[,c(3,5)])
-```
-
-```{r}
-df_MergeAcc_NoDupes_dist_bioreps_MPs <- t(df_MergeAcc_NoDupes_dist_bioreps_MPs)
-dist_bioreps_MPs <- dist(df_MergeAcc_NoDupes_dist_bioreps_MPs, method = "euclidean")
-```
-```{r}
-hc_bioreps_MPs<- hclust(dist_bioreps_MPs)
-hcd_bioreps_MPs <- as.dendrogram(hc_bioreps_MPs)
-plot(hcd_bioreps_MPs, type = "rectangle", ylab = "height")
-```
-
-```{r}
-res.dist_bioreps <- factoextra::get_dist(df_MergeAcc_NoDupes_dist_bioreps_MPs, stand = F, method = "spearman")
-factoextra::fviz_dist(res.dist_bioreps, 
-   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+colnames(df_NoDecoys_Biomart_epost)
 ```
 
 
-```{r}
-df_MergeAcc_NoDupes_merge_fixed_NoDecoys_go.photo <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys[(df_MergeAcc_NoDupes_merge_fixed_NoDecoys$maizegdb%in%accessions.go.photosynthesis),]
-```
-```{r}
-refseqpep.go.photo <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys_go.photo$RefSeqPep
-```
-
-
-```{r}
-#Build distance matrix
-df_MergeAcc_NoDupes_dist <- df_MergeAcc_NoDupes_merge_fixed_NoDecoys[,20:23]
-
-df_MergeAcc_NoDupes_dist <- t(df_MergeAcc_NoDupes_dist)
-
-dist <- dist(df_MergeAcc_NoDupes_dist, method = "euclidean")
-cor <- cor(df_MergeAcc_NoDupes_dist, method = "pearson")
-dist
-```
-```{r}
-#Plot distance matrix
-res.dist <- factoextra::get_dist(df_MergeAcc_NoDupes_dist, stand = TRUE, method = "euclidean")
-factoextra::fviz_dist(res.dist, 
-   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
-```
-```{r}
-#build heirarchical clustering
-hc<- hclust(dist, method = "ward.D2")
-hcd <- as.dendrogram(hc)
-plot(hcd, type = "rectangle", ylab = "height")
-```
-
-
-```{r}
-#Run analyses (DF functions)
-df_DF <- DF(df_MergeAcc_NoDupes_merge_fixed_NoDecoys)
-df_DF_HybSigDif <- DF_HybSigDif(df_MergeAcc_NoDupes_merge_fixed_NoDecoys)
-df_DF_ACSSigDif <- DF_ACSSigDif(df_MergeAcc_NoDupes_merge_fixed_NoDecoys)
-```
-
-```{r}
-df_DF_HybSigDif_10above <- df_DF_HybSigDif[(df_DF_HybSigDif$HybAvg>(df_DF_HybSigDif$MPavg*1.1)),]
-df_DF_HybSigDif_5above <- df_DF_HybSigDif[(df_DF_HybSigDif$HybAvg>(df_DF_HybSigDif$MPavg*1.05)),]
-
-df_DF_ACSSigDif_10above <- df_DF_ACSSigDif[(df_DF_ACSSigDif$ACSavg>(df_DF_ACSSigDif$B73avg*1.1)),]
-df_DF_ACSSigDif_5above <- df_DF_ACSSigDif[(df_DF_ACSSigDif$ACSavg>(df_DF_ACSSigDif$B73avg*1.05)),]
-
-df_DF_HybSigDif_10below <- df_DF_HybSigDif[(df_DF_HybSigDif$HybAvg<(df_DF_HybSigDif$MPavg*0.9)),]
-df_DF_HybSigDif_5below <- df_DF_HybSigDif[(df_DF_HybSigDif$HybAvg<(df_DF_HybSigDif$MPavg*0.95)),]
-
-df_DF_ACSSigDif_10below <- df_DF_ACSSigDif[(df_DF_ACSSigDif$ACSavg<(df_DF_ACSSigDif$B73avg*0.9)),]
-df_DF_ACSSigDif_5below <- df_DF_ACSSigDif[(df_DF_ACSSigDif$ACSavg<(df_DF_ACSSigDif$B73avg*0.95)),]
-```
-
-```{r gamer_ReadIn, include=FALSE}
-# Read in Maize GAMER GO dataset, which lists V4 accessions with all associated GO terms (Wimalanathan et al. 2018) downloaded from doi.org/10.7946/P2M925
-#unzip("maize.B73.AGPv4.aggregate.gaf.zip")
-GAMER <- read.delim("maize.B73.AGPv4.aggregate.gaf", sep = "\t", header = FALSE, stringsAsFactors = F)
-colnames(GAMER) <- c("db", "db_object_id", "db_object_symbol", "qualifier", "term_accession", "db_reference", "evidence_code", "with", "aspect", "db_object_name", "db_object_synonym", "db_object_type", "taxon", "date", "assigned_by", "annotation_extension", "gene_product_form_id")
-
-gamer <- GAMER[-(1:2),]
-
-gamer$Term <- Term(as.character(gamer$term_accession))
-```
-```{r}
-go.photosynthesis <- na.omit(gamer[(gamer$Term=="photosynthesis"),])
-accessions.go.photosynthesis <- go.photosynthesis$db_object_id
-```
-```{r}
-go.ribosome <- na.omit(gamer[(gamer$Term=="ribosome"),])
-accessions.go.ribosome <- go.ribosome$db_object_id
-```
-
-
-
-```{r}
-# merge ACS and Hyb 5% above/below to find common proteins
-HYB_and_ACS_5above <- merge.data.frame(df_DF_HybSigDif_5above, df_DF_ACSSigDif_5above, by.x = "Protein", by.y = "Protein", all = F)
-HYB_and_ACS_5below <- merge.data.frame(df_DF_HybSigDif_5below, df_DF_ACSSigDif_5below, by.x = "Protein", by.y = "Protein", all = F)
-
-#merge wqith gamer GO
-HYB_and_ACS_5above_GO <- merge.data.frame(HYB_and_ACS_5above, gamer, by.x = "ID.x", by.y = "db_object_id", all.x = T, all.y = F)
-HYB_and_ACS_5below_GO <- merge.data.frame(HYB_and_ACS_5below, gamer, by.x = "ID.x", by.y = "db_object_id", all.x = T, all.y = F)
-#re-arrange columns
-HYB_and_ACS_5above_GO_reorg <- HYB_and_ACS_5above_GO[,c(1:8,14,19,23,32)]
-colnames(HYB_and_ACS_5above_GO_reorg) <- c("ID", "Protein", "B73", "Mo17", "MP", "ACS", "Hyb", "HtoP_ttest", "ACStoB73_ttest", "GOaccession","GOaspect", "GOterm")
-HYB_and_ACS_5below_GO_reorg <- HYB_and_ACS_5below_GO[,c(1:8,14,19,23,32)]
-colnames(HYB_and_ACS_5below_GO_reorg) <- c("ID", "Protein", "B73", "Mo17", "MP", "ACS", "Hyb", "HtoP_ttest", "ACStoB73_ttest", "GOaccession","GOaspect", "GOterm")
-#write csv
-write.csv(HYB_and_ACS_5above_GO_reorg, "HYB_and_ACS_5above.csv")
-write.csv(HYB_and_ACS_5below_GO_reorg, "HYB_and_ACS_5below.csv")
-```
-
-```{r}
-#Subset to just Biological Process GO terms
-HYB_and_ACS_5above_GO_reorg_BP <- HYB_and_ACS_5above_GO_reorg[(HYB_and_ACS_5above_GO_reorg$GOaspect=="P"),]
-HYB_and_ACS_5above_GO_reorg_BP_Ven <- HYB_and_ACS_5above_GO_reorg_BP[,c(1,12)]
-#Make table to show frequency of BP GO terms
-table <- table(HYB_and_ACS_5above_GO_reorg_BP_Ven$GOterm)
-table[order(-table)]
-```
-
-### TopGO analysis
-
-```{r GOanalysisGOdata_Function}
-## Build GOdata object
-# EnrichedDF = DF with V4 accessions for GOIs in column named "ID"
-# GamerCut = GAMER dataframe trimmed to control set
-# ont = "BP", "MF", or "CC"
-GOanalysisGodata <- function(EnrichedDF, GamerCut, ont, nodesize = 1){
-  gene2GO_TissueCut <- split((as.character(GamerCut$term_accession)),GamerCut$db_object_id)
-  gene2GOb_TissueCut <- gene2GO_TissueCut[-2]
-  str(head(gene2GOb_TissueCut))
-  geneNames_tissuecut <- names(gene2GOb_TissueCut)
-  myInterestingGenes <- EnrichedDF$ID
-  myInterestingGenes <- na.omit(myInterestingGenes)
-  geneList <- factor(as.integer(geneNames_tissuecut %in% myInterestingGenes))
-  names(geneList) <- geneNames_tissuecut
-  GOdata <- new("topGOdata", ontology = ont, allGenes = geneList, annot = annFUN.gene2GO, nodeSize=nodesize, gene2GO = gene2GOb_TissueCut)
-  GOdata
-}
-```
-```{r GOanalysisDF_Function}
-## GO analysis function to generate dataframe summary of top 20 of GO terms
-# GOdata = Godata object (output of GoanalysisGodata function)
-
-GOanalysisDF <- function(GOdata){
-resultFis <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
-test.statF <- new("classicCount", testStatistic = GOFisherTest, name = "Fisher test")
-resultFisher <- getSigGroups(GOdata, test.statF)
-test.statKS <- new("classicScore", testStatistic = GOKSTest, name = "KS tests")
-resultKS <- getSigGroups(GOdata, test.statKS)
-test.statRW <- new("weightCount", testStatistic = GOFisherTest, name = "Fisher test", sigRatio = "ratio")
-resultWeight <- getSigGroups(GOdata, test.statRW)
-DF <- GenTable(GOdata, classic = resultFis, KS = resultKS, weight = resultWeight, orderBy = "classic", ranksOf = "classic", topNodes = 20)
-png((paste0(c(deparse(substitute(GOdata))),".png")), height=450, width=750)
-p<-tableGrob(DF, rows = c())
-grid.arrange(p)
-dev.off()
-DF
-}
-```
-
-
-```{r}
-## GO analysis function to build map of top GO terms, output to pdf
-# GOdata = Godata object (output of GoanalysisGodata function)
-GOanalysisMap <- function(GOdata, nodes=10){
-  resultFis <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
-  printGraph(GOdata, resultFis, firstSigNodes = nodes, fn.prefix = (paste0(c(deparse(substitute(GOdata))),".png")), useInfo = "all", pdfSW = TRUE)
+```{r PlotExp function}
+PlotExp <- function(V4acc){
+b73 <- df_NoDecoys_Biomart_epost[((as.character(df_NoDecoys_Biomart_epost$V4))==V4acc), 3:5]
+mo17 <- df_NoDecoys_Biomart_epost[((as.character(df_NoDecoys_Biomart_epost$V4))==V4acc), 6:7]
+hyb <- df_NoDecoys_Biomart_epost[((as.character(df_NoDecoys_Biomart_epost$V4))==V4acc), 8:9]
+acs <- df_NoDecoys_Biomart_epost[((as.character(df_NoDecoys_Biomart_epost$V4))==V4acc), 10:12]
+all4 <- c(as.numeric(b73[1,]), as.numeric(mo17[1,]), as.numeric(hyb[1,]), as.numeric(acs[1,]))
+all4df <- data.frame(sample=(c("b73.1", "b73.2", "b73.3", "mo17.1", "mo17.2", "hyb.1", "hyb.2", "acs.1", "acs.2", "acs.3")), TMT=all4)
+all4df$sample <- factor(all4df$sample, levels = all4df$sample)
+ggplot(data=all4df, aes(x=sample, y=TMT, width=0.75)) + geom_bar(stat="identity", fill = c("blue3", "blue3", "blue3", "red3", "red3",  "purple4", "purple4", "green3", "green3", "green3")) + labs(title=V4acc)
 }
 ```
 ```{r}
-PrevSL <- read.csv("CSVs/PreviousAnalysis/SeedlingLeafNoNANoDupes.csv", stringsAsFactors = F)
-PrevSL_AHP10 <- read.csv("CSVs/PreviousAnalysis/SL_AHP10.csv", stringsAsFactors = F)
-PrevSL_BLP10 <- read.csv("CSVs/PreviousAnalysis/SL_BLP10.csv", stringsAsFactors = F)
-```
-
-
-```{r}
-#Make gamer dataframe trimmed to only proteins detected in this run to use as background control set for enrichment analyses (input for "GamerCut" in GOanalysisGodata function)
-GamerCut <- gamer[(gamer$db_object_id %in% df_DF$ID),]
+PlotExp("Zm00001d045479")
 ```
 ```{r}
-GamerCut_PrevSL <- gamer[(gamer$db_object_id %in% PrevSL$Accessions),]
+GO.DF.l$DF.bm.sig.10above.godataBP
 ```
 
 ```{r}
-nrow(df_DF_HybSigDif_10above)
-nrow(df_DF_ACSSigDif_10above)
-nrow(df_DF_HybSigDif_5above)
-nrow(df_DF_ACSSigDif_5above)
-nrow(PrevSL_AHP10)
-```
-
-```{r}
-nrow(df_DF_HybSigDif_10below)
-nrow(df_DF_ACSSigDif_10below)
-nrow(df_DF_HybSigDif_5below)
-nrow(df_DF_ACSSigDif_5below)
-nrow(PrevSL_BLP10)
-```
-```{r}
-Prev_HybGOdata_10above_BP <- GOanalysisGodata(PrevSL_AHP10, GamerCut_PrevSL, "BP")
-Prev_HybGOdata_10above_MF <- GOanalysisGodata(PrevSL_AHP10, GamerCut_PrevSL, "MF")
-Prev_HybGOdata_10above_CC <- GOanalysisGodata(PrevSL_AHP10, GamerCut_PrevSL, "CC")
-
-HybGOdata_10above_BP <- GOanalysisGodata(df_DF_HybSigDif_10above, GamerCut, "BP")
-HybGOdata_10above_MF <- GOanalysisGodata(df_DF_HybSigDif_10above, GamerCut, "MF")
-HybGOdata_10above_CC <- GOanalysisGodata(df_DF_HybSigDif_10above, GamerCut, "CC")
-
-HybGOdata_5above_BP <- GOanalysisGodata(df_DF_HybSigDif_5above, GamerCut, "BP")
-HybGOdata_5above_MF <- GOanalysisGodata(df_DF_HybSigDif_5above, GamerCut, "MF")
-HybGOdata_5above_CC <- GOanalysisGodata(df_DF_HybSigDif_5above, GamerCut, "CC")
-
-ACSGOdata_10above_BP <- GOanalysisGodata(df_DF_ACSSigDif_10above, GamerCut, "BP")
-ACSGOdata_10above_MF <- GOanalysisGodata(df_DF_ACSSigDif_10above, GamerCut, "MF")
-ACSGOdata_10above_CC <- GOanalysisGodata(df_DF_ACSSigDif_10above, GamerCut, "CC")
-
-ACSGOdata_5above_BP <- GOanalysisGodata(df_DF_ACSSigDif_5above, GamerCut, "BP")
-ACSGOdata_5above_MF <- GOanalysisGodata(df_DF_ACSSigDif_5above, GamerCut, "MF")
-ACSGOdata_5above_CC <- GOanalysisGodata(df_DF_ACSSigDif_5above, GamerCut, "CC")
-
-Prev_HybGOdata_10below_BP <- GOanalysisGodata(PrevSL_BLP10, GamerCut_PrevSL, "BP")
-Prev_HybGOdata_10below_MF <- GOanalysisGodata(PrevSL_BLP10, GamerCut_PrevSL, "MF")
-Prev_HybGOdata_10below_CC <- GOanalysisGodata(PrevSL_BLP10, GamerCut_PrevSL, "CC")
-
-HybGOdata_10below_BP <- GOanalysisGodata(df_DF_HybSigDif_10below, GamerCut, "BP")
-HybGOdata_10below_MF <- GOanalysisGodata(df_DF_HybSigDif_10below, GamerCut, "MF")
-HybGOdata_10below_CC <- GOanalysisGodata(df_DF_HybSigDif_10below, GamerCut, "CC")
-
-HybGOdata_5below_BP <- GOanalysisGodata(df_DF_HybSigDif_5below, GamerCut, "BP")
-HybGOdata_5below_MF <- GOanalysisGodata(df_DF_HybSigDif_5below, GamerCut, "MF")
-HybGOdata_5below_CC <- GOanalysisGodata(df_DF_HybSigDif_5below, GamerCut, "CC")
-
-ACSGOdata_10below_BP <- GOanalysisGodata(df_DF_ACSSigDif_10below, GamerCut, "BP")
-ACSGOdata_10below_MF <- GOanalysisGodata(df_DF_ACSSigDif_10below, GamerCut, "MF")
-ACSGOdata_10below_CC <- GOanalysisGodata(df_DF_ACSSigDif_10below, GamerCut, "CC")
-
-ACSGOdata_5below_BP <- GOanalysisGodata(df_DF_ACSSigDif_5below, GamerCut, "BP")
-ACSGOdata_5below_MF <- GOanalysisGodata(df_DF_ACSSigDif_5below, GamerCut, "MF")
-ACSGOdata_5below_CC <- GOanalysisGodata(df_DF_ACSSigDif_5below, GamerCut, "CC")
-```
-
-```{r}
-write.csv(df_DF_HybSigDif_10above, "df_DF_HybSigDif_10above.csv")
-write.csv(df_DF_ACSSigDif_10above, "df_DF_ACSSigDif_10above.csv")
-write.csv(df_DF_HybSigDif_10below, "df_DF_HybSigDif_10below.csv")
-write.csv(df_DF_ACSSigDif_10below, "df_DF_ACSSigDif_10below.csv")
-```
-
-```{r}
-#define vectors of V4 accessions in each above/below group for Venn diagram construction
-HYB5above_ID_V <-(df_DF_HybSigDif_5above$ID)
-HYB5below_ID_V <-(df_DF_HybSigDif_5below$ID)
-ACS5above_ID_V <-(df_DF_ACSSigDif_5above$ID)
-ACS5below_ID_V <-(df_DF_ACSSigDif_5below$ID)
-
-HYB10above_ID_V <-(df_DF_HybSigDif_10above$ID)
-HYB10below_ID_V <-(df_DF_HybSigDif_10below$ID)
-ACS10above_ID_V <-(df_DF_ACSSigDif_10above$ID)
-ACS10below_ID_V <-(df_DF_ACSSigDif_10below$ID)
-
-Prev_HYB10above_ID_V <-(PrevSL_AHP10$ID)
-Prev_HYB10below_ID_V <-(PrevSL_BLP10$ID)
-```
-```{r}
-## 5% above/below, current hybrid data
-
-#Create new DF for input in GOanalysisGodata function that is only proteins common to both ACS and HYB
-df_DF_HybACSSigDif_5above <- df_DF_HybSigDif_5above[(df_DF_HybSigDif_5above$Protein%in%df_DF_ACSSigDif_5above$Protein),]
-df_DF_HybACSSigDif_5below <- df_DF_HybSigDif_5below[(df_DF_HybSigDif_5below$Protein%in%df_DF_ACSSigDif_5below$Protein),]
-
-#Create new DF for input in GOanalysisGodata function that is only proteins enriched in ACS but NOT HYB
-df_DF_ACSnotHYBSigDif_5above <- df_DF_ACSSigDif_5above[!(df_DF_ACSSigDif_5above$Protein%in%df_DF_HybSigDif_5above$Protein),]
-df_DF_ACSnotHYBSigDif_5below <- df_DF_ACSSigDif_5below[!(df_DF_ACSSigDif_5below$Protein%in%df_DF_HybSigDif_5below$Protein),]
-
-#Create new DF for input in GOanalysisGodata function that is only proteins enriched in HYB but NOT ACS
-df_DF_HYBnotACSSigDif_5above <- df_DF_HybSigDif_5above[!(df_DF_HybSigDif_5above$Protein%in%df_DF_ACSSigDif_5above$Protein),]
-df_DF_HYBnotACSSigDif_5below <- df_DF_HybSigDif_5below[!(df_DF_HybSigDif_5below$Protein%in%df_DF_ACSSigDif_5below$Protein),]
-```
-```{r}
-##10 % above/below, current hybrid data
-
-#Create new DF for input in GOanalysisGodata function that is only proteins common to both ACS and HYB
-df_DF_HybACSSigDif_10above <- df_DF_HybSigDif_10above[(df_DF_HybSigDif_10above$Protein%in%df_DF_ACSSigDif_10above$Protein),]
-df_DF_HybACSSigDif_10below <- df_DF_HybSigDif_10below[(df_DF_HybSigDif_10below$Protein%in%df_DF_ACSSigDif_10below$Protein),]
-
-#Create new DF for input in GOanalysisGodata function that is only proteins enriched in ACS but NOT HYB
-df_DF_ACSnotHYBSigDif_10above <- df_DF_ACSSigDif_10above[!(df_DF_ACSSigDif_10above$Protein%in%df_DF_HybSigDif_10above$Protein),]
-df_DF_ACSnotHYBSigDif_10below <- df_DF_ACSSigDif_10below[!(df_DF_ACSSigDif_10below$Protein%in%df_DF_HybSigDif_10below$Protein),]
-
-#Create new DF for input in GOanalysisGodata function that is only proteins enriched in HYB but NOT ACS
-df_DF_HYBnotACSSigDif_10above <- df_DF_HybSigDif_10above[!(df_DF_HybSigDif_10above$Protein%in%df_DF_ACSSigDif_10above$Protein),]
-df_DF_HYBnotACSSigDif_10below <- df_DF_HybSigDif_10below[!(df_DF_HybSigDif_10below$Protein%in%df_DF_ACSSigDif_10below$Protein),]
-```
-```{r}
-##10 % above/below, PREVIOUS hybrid SL data
-
-#Create new DF for input in GOanalysisGodata function that is only proteins common to both ACS and Previous HYB
-df_DF_Prev_HybACSSigDif_10above <- PrevSL_AHP10[(PrevSL_AHP10$Protein%in%df_DF_ACSSigDif_10above$Protein),]
-df_DF_Prev_HybACSSigDif_10below <- PrevSL_BLP10[(PrevSL_BLP10$Protein%in%df_DF_ACSSigDif_10below$Protein),]
-
-#Create new DF for input in GOanalysisGodata function that is only proteins enriched in ACS but NOT Previous HYB
-df_DF_Prev_ACSnotHYBSigDif_10above <- df_DF_ACSSigDif_10above[!(df_DF_ACSSigDif_10above$Protein%in%PrevSL_AHP10$Protein),]
-df_DF_Prev_ACSnotHYBSigDif_10below <- df_DF_ACSSigDif_10below[!(df_DF_ACSSigDif_10below$Protein%in%PrevSL_BLP10$Protein),]
-
-#Create new DF for input in GOanalysisGodata function that is only proteins enriched in HYB but NOT Previous ACS
-df_DF_Prev_HYBnotACSSigDif_10above <- PrevSL_AHP10[!(PrevSL_AHP10$Protein%in%df_DF_ACSSigDif_10above$Protein),]
-df_DF_Prev_HYBnotACSSigDif_10below <- PrevSL_BLP10[!(PrevSL_BLP10$Protein%in%df_DF_ACSSigDif_10below$Protein),]
-```
-
-```{r}
-#Construct and print venn diagrams of instersecting enriched proteins
-VennDiagram::venn.diagram(list("BxM"=HYB5above_ID_V, "acs2/6"=ACS5above_ID_V), main = "Proteins 5% above expected (p<0.05)", filename = "5aboveVenn", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(0,45), main.pos = c(0.5,0.95))
-
-VennDiagram::venn.diagram(list("BxM"=HYB5below_ID_V, "acs2/6"=ACS5below_ID_V), main = "Proteins 5% below expected (p<0.05)", filename = "5belowVenn", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(0,45), main.pos = c(0.5,0.95))
-
-VennDiagram::venn.diagram(list("BxM"=HYB10above_ID_V, "acs2/6"=ACS10above_ID_V), main = "Proteins 10% above expected (p<0.05)", filename = "10aboveVenn", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(200,180), main.pos = c(0.5,0.98), cex=1.5, cat.cex=1.5, cat.dist=c(-0.025,-0.05), main.cex = 2)
-
-VennDiagram::venn.diagram(list("BxM"=HYB10below_ID_V, "acs2/6"=ACS10below_ID_V), main = "Proteins 10% below expected (p<0.05)", filename = "10belowVenn", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(210,180), main.pos = c(0.5,0.98), cex=1.5, cat.cex=1.5, cat.dist=c(-0.035,-0.05), main.cex = 2)
-
-VennDiagram::venn.diagram(list("Previous BxM"=Prev_HYB10above_ID_V, "acs2/6"=ACS10above_ID_V), main = "Proteins 10% above expected (p<0.05)", filename = "10aboveVenn_PreviousHyb", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(180,180), main.pos = c(0.5,0.9), cex=1.5, cat.cex=1.5, cat.dist=-0.05, main.cex = 2)
-
-VennDiagram::venn.diagram(list("Previous BxM"=Prev_HYB10below_ID_V, "acs2/6"=ACS10below_ID_V), main = "Proteins 10% below expected (p<0.05)", filename = "10belowVenn_PreviousHyb", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(180,180), main.pos = c(0.5,0.9), cex=1.5, cat.cex=1.5, cat.dist=-0.05, main.cex = 2)
-```
-
-```{r}
-#Build GOdata objects for discrete areas of venn diagrams
-HybACSGOdata_5above_BP <- GOanalysisGodata(df_DF_HybACSSigDif_5above, GamerCut, "BP")
-HybACSGOdata_5above_MF <- GOanalysisGodata(df_DF_HybACSSigDif_5above, GamerCut, "MF")
-HybACSGOdata_5above_CC <- GOanalysisGodata(df_DF_HybACSSigDif_5above, GamerCut, "CC")
-
-HybACSGOdata_5below_BP <- GOanalysisGodata(df_DF_HybACSSigDif_5below, GamerCut, "BP")
-HybACSGOdata_5below_MF <- GOanalysisGodata(df_DF_HybACSSigDif_5below, GamerCut, "MF")
-HybACSGOdata_5below_CC <- GOanalysisGodata(df_DF_HybACSSigDif_5below, GamerCut, "CC")
-
-ACSnotHYBGOdata_5above_BP <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_5above, GamerCut, "BP")
-ACSnotHYBGOdata_5above_MF <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_5above, GamerCut, "MF")
-ACSnotHYBGOdata_5above_CC <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_5above, GamerCut, "CC")
-
-ACSnotHYBGOdata_5below_BP <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_5below, GamerCut, "BP")
-ACSnotHYBGOdata_5below_MF <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_5below, GamerCut, "MF")
-ACSnotHYBGOdata_5below_CC <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_5below, GamerCut, "CC")
-
-HYBnotACSGOdata_5above_BP <- GOanalysisGodata(df_DF_HYBnotACSSigDif_5above, GamerCut, "BP")
-HYBnotACSGOdata_5above_MF <- GOanalysisGodata(df_DF_HYBnotACSSigDif_5above, GamerCut, "MF")
-HYBnotACSGOdata_5above_CC <- GOanalysisGodata(df_DF_HYBnotACSSigDif_5above, GamerCut, "CC")
-
-HYBnotACSGOdata_5below_BP <- GOanalysisGodata(df_DF_HYBnotACSSigDif_5below, GamerCut, "BP")
-HYBnotACSGOdata_5below_MF <- GOanalysisGodata(df_DF_HYBnotACSSigDif_5below, GamerCut, "MF")
-HYBnotACSGOdata_5below_CC <- GOanalysisGodata(df_DF_HYBnotACSSigDif_5below, GamerCut, "CC")
-
-HybACSGOdata_10above_BP <- GOanalysisGodata(df_DF_HybACSSigDif_10above, GamerCut, "BP")
-HybACSGOdata_10above_MF <- GOanalysisGodata(df_DF_HybACSSigDif_10above, GamerCut, "MF")
-HybACSGOdata_10above_CC <- GOanalysisGodata(df_DF_HybACSSigDif_10above, GamerCut, "CC")
-
-HybACSGOdata_10below_BP <- GOanalysisGodata(df_DF_HybACSSigDif_10below, GamerCut, "BP")
-HybACSGOdata_10below_MF <- GOanalysisGodata(df_DF_HybACSSigDif_10below, GamerCut, "MF")
-HybACSGOdata_10below_CC <- GOanalysisGodata(df_DF_HybACSSigDif_10below, GamerCut, "CC")
-
-ACSnotHYBGOdata_10above_BP <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10above, GamerCut, "BP")
-ACSnotHYBGOdata_10above_MF <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10above, GamerCut, "MF")
-ACSnotHYBGOdata_10above_CC <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10above, GamerCut, "CC")
-
-ACSnotHYBGOdata_10below_BP <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10below, GamerCut, "BP")
-ACSnotHYBGOdata_10below_MF <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10below, GamerCut, "MF")
-ACSnotHYBGOdata_10below_CC <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10below, GamerCut, "CC")
-
-HYBnotACSGOdata_10above_BP <- GOanalysisGodata(df_DF_HYBnotACSSigDif_10above, GamerCut, "BP")
-HYBnotACSGOdata_10above_MF <- GOanalysisGodata(df_DF_HYBnotACSSigDif_10above, GamerCut, "MF")
-HYBnotACSGOdata_10above_CC <- GOanalysisGodata(df_DF_HYBnotACSSigDif_10above, GamerCut, "CC")
-
-HYBnotACSGOdata_10below_BP <- GOanalysisGodata(df_DF_HYBnotACSSigDif_10below, GamerCut, "BP")
-HYBnotACSGOdata_10below_MF <- GOanalysisGodata(df_DF_HYBnotACSSigDif_10below, GamerCut, "MF")
-HYBnotACSGOdata_10below_CC <- GOanalysisGodata(df_DF_HYBnotACSSigDif_10below, GamerCut, "CC")
-
-HybACSGOdata_Prev_10above_BP <- GOanalysisGodata(df_DF_Prev_HybACSSigDif_10above, GamerCut, "BP")
-HybACSGOdata_Prev_10above_MF <- GOanalysisGodata(df_DF_Prev_HybACSSigDif_10above, GamerCut, "MF")
-HybACSGOdata_Prev_10above_CC <- GOanalysisGodata(df_DF_Prev_HybACSSigDif_10above, GamerCut, "CC")
-
-HybACSGOdata_Prev_10below_BP <- GOanalysisGodata(df_DF_Prev_HybACSSigDif_10below, GamerCut, "BP")
-HybACSGOdata_Prev_10below_MF <- GOanalysisGodata(df_DF_Prev_HybACSSigDif_10below, GamerCut, "MF")
-HybACSGOdata_Prev_10below_CC <- GOanalysisGodata(df_DF_Prev_HybACSSigDif_10below, GamerCut, "CC")
-
-ACSnotHYBGOdata_Prev_10above_BP <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10above, GamerCut, "BP")
-ACSnotHYBGOdata_Prev_10above_MF <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10above, GamerCut, "MF")
-ACSnotHYBGOdata_Prev_10above_CC <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10above, GamerCut, "CC")
-
-ACSnotHYBGOdata_Prev_10below_BP <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10below, GamerCut, "BP")
-ACSnotHYBGOdata_Prev_10below_MF <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10below, GamerCut, "MF")
-ACSnotHYBGOdata_Prev_10below_CC <- GOanalysisGodata(df_DF_ACSnotHYBSigDif_10below, GamerCut, "CC")
-
-HYBnotACSGOdata_Prev_10above_BP <- GOanalysisGodata(df_DF_Prev_HYBnotACSSigDif_10above, GamerCut, "BP")
-HYBnotACSGOdata_Prev_10above_MF <- GOanalysisGodata(df_DF_Prev_HYBnotACSSigDif_10above, GamerCut, "MF")
-HYBnotACSGOdata_Prev_10above_CC <- GOanalysisGodata(df_DF_Prev_HYBnotACSSigDif_10above, GamerCut, "CC")
-
-HYBnotACSGOdata_Prev_10below_BP <- GOanalysisGodata(df_DF_Prev_HYBnotACSSigDif_10below, GamerCut, "BP")
-HYBnotACSGOdata_Prev_10below_MF <- GOanalysisGodata(df_DF_Prev_HYBnotACSSigDif_10below, GamerCut, "MF")
-HYBnotACSGOdata_Prev_10below_CC <- GOanalysisGodata(df_DF_Prev_HYBnotACSSigDif_10below, GamerCut, "CC")
-```
-
-```{r}
-HybGOdata_10above_BP_DF <- GOanalysisDF(HybGOdata_10above_BP)
-HybGOdata_10above_MF_DF <- GOanalysisDF(HybGOdata_10above_MF)
-HybGOdata_10above_CC_DF <- GOanalysisDF(HybGOdata_10above_CC)
-
-HybGOdata_5above_BP_DF <- GOanalysisDF(HybGOdata_5above_BP)
-HybGOdata_5above_MF_DF <- GOanalysisDF(HybGOdata_5above_MF)
-HybGOdata_5above_CC_DF <- GOanalysisDF(HybGOdata_5above_CC)
-
-ACSGOdata_10above_BP_DF <- GOanalysisDF(ACSGOdata_10above_BP)
-ACSGOdata_10above_MF_DF <- GOanalysisDF(ACSGOdata_10above_MF)
-ACSGOdata_10above_CC_DF <- GOanalysisDF(ACSGOdata_10above_CC)
-
-ACSGOdata_5above_BP_DF <- GOanalysisDF(ACSGOdata_5above_BP)
-ACSGOdata_5above_MF_DF <- GOanalysisDF(ACSGOdata_5above_MF)
-ACSGOdata_5above_CC_DF <- GOanalysisDF(ACSGOdata_5above_CC)
-
-HybGOdata_10below_BP_DF <- GOanalysisDF(HybGOdata_10below_BP)
-HybGOdata_10below_MF_DF <- GOanalysisDF(HybGOdata_10below_MF)
-HybGOdata_10below_CC_DF <- GOanalysisDF(HybGOdata_10below_CC)
-
-HybGOdata_5below_BP_DF <- GOanalysisDF(HybGOdata_5below_BP)
-HybGOdata_5below_MF_DF <- GOanalysisDF(HybGOdata_5below_MF)
-HybGOdata_5below_CC_DF <- GOanalysisDF(HybGOdata_5below_CC)
-
-ACSGOdata_10below_BP_DF <- GOanalysisDF(ACSGOdata_10below_BP)
-ACSGOdata_10below_MF_DF <- GOanalysisDF(ACSGOdata_10below_MF)
-ACSGOdata_10below_CC_DF <- GOanalysisDF(ACSGOdata_10below_CC)
-
-ACSGOdata_5below_BP_DF <- GOanalysisDF(ACSGOdata_5below_BP)
-ACSGOdata_5below_MF_DF <- GOanalysisDF(ACSGOdata_5below_MF)
-ACSGOdata_5below_CC_DF <- GOanalysisDF(ACSGOdata_5below_CC)
-
-HybACSGOdata_5above_BP_DF <- GOanalysisDF(HybACSGOdata_5above_BP)
-HybACSGOdata_5above_MF_DF <- GOanalysisDF(HybACSGOdata_5above_MF)
-HybACSGOdata_5above_CC_DF <- GOanalysisDF(HybACSGOdata_5above_CC)
-
-HybACSGOdata_5below_BP_DF <- GOanalysisDF(HybACSGOdata_5below_BP)
-HybACSGOdata_5below_MF_DF <- GOanalysisDF(HybACSGOdata_5below_MF)
-HybACSGOdata_5below_CC_DF <- GOanalysisDF(HybACSGOdata_5below_CC)
-
-ACSnotHYBGOdata_5above_BP_DF <- GOanalysisDF(ACSnotHYBGOdata_5above_BP)
-ACSnotHYBGOdata_5above_MF_DF <- GOanalysisDF(ACSnotHYBGOdata_5above_MF)
-ACSnotHYBGOdata_5above_CC_DF <- GOanalysisDF(ACSnotHYBGOdata_5above_CC)
-
-ACSnotHYBGOdata_5below_BP_DF <- GOanalysisDF(ACSnotHYBGOdata_5below_BP)
-ACSnotHYBGOdata_5below_MF_DF <- GOanalysisDF(ACSnotHYBGOdata_5below_MF)
-ACSnotHYBGOdata_5below_CC_DF <- GOanalysisDF(ACSnotHYBGOdata_5below_CC)
-
-HYBnotACSGOdata_5above_BP_DF <- GOanalysisDF(HYBnotACSGOdata_5above_BP)
-HYBnotACSGOdata_5above_MF_DF <- GOanalysisDF(HYBnotACSGOdata_5above_MF)
-HYBnotACSGOdata_5above_CC_DF <- GOanalysisDF(HYBnotACSGOdata_5above_CC)
-
-HYBnotACSGOdata_5below_BP_DF <- GOanalysisDF(HYBnotACSGOdata_5below_BP)
-HYBnotACSGOdata_5below_MF_DF <- GOanalysisDF(HYBnotACSGOdata_5below_MF)
-HYBnotACSGOdata_5below_CC_DF <- GOanalysisDF(HYBnotACSGOdata_5below_CC)
-```
-```{r}
-HybACSGOdata_10above_BP_DF <- GOanalysisDF(HybACSGOdata_10above_BP)
-HybACSGOdata_10above_MF_DF <- GOanalysisDF(HybACSGOdata_10above_MF)
-HybACSGOdata_10above_CC_DF <- GOanalysisDF(HybACSGOdata_10above_CC)
-
-HybACSGOdata_10below_BP_DF <- GOanalysisDF(HybACSGOdata_10below_BP)
-HybACSGOdata_10below_MF_DF <- GOanalysisDF(HybACSGOdata_10below_MF)
-HybACSGOdata_10below_CC_DF <- GOanalysisDF(HybACSGOdata_10below_CC)
-
-ACSnotHYBGOdata_10above_BP_DF <- GOanalysisDF(ACSnotHYBGOdata_10above_BP)
-ACSnotHYBGOdata_10above_MF_DF <- GOanalysisDF(ACSnotHYBGOdata_10above_MF)
-ACSnotHYBGOdata_10above_CC_DF <- GOanalysisDF(ACSnotHYBGOdata_10above_CC)
-
-ACSnotHYBGOdata_10below_BP_DF <- GOanalysisDF(ACSnotHYBGOdata_10below_BP)
-ACSnotHYBGOdata_10below_MF_DF <- GOanalysisDF(ACSnotHYBGOdata_10below_MF)
-ACSnotHYBGOdata_10below_CC_DF <- GOanalysisDF(ACSnotHYBGOdata_10below_CC)
-
-HYBnotACSGOdata_10above_BP_DF <- GOanalysisDF(HYBnotACSGOdata_10above_BP)
-HYBnotACSGOdata_10above_MF_DF <- GOanalysisDF(HYBnotACSGOdata_10above_MF)
-HYBnotACSGOdata_10above_CC_DF <- GOanalysisDF(HYBnotACSGOdata_10above_CC)
-
-HYBnotACSGOdata_10below_BP_DF <- GOanalysisDF(HYBnotACSGOdata_10below_BP)
-HYBnotACSGOdata_10below_MF_DF <- GOanalysisDF(HYBnotACSGOdata_10below_MF)
-HYBnotACSGOdata_10below_CC_DF <- GOanalysisDF(HYBnotACSGOdata_10below_CC)
-
-HybACSGOdata_Prev_10above_BP_DF <- GOanalysisDF(HybACSGOdata_Prev_10above_BP)
-HybACSGOdata_Prev_10above_MF_DF <- GOanalysisDF(HybACSGOdata_Prev_10above_MF)
-HybACSGOdata_Prev_10above_CC_DF <- GOanalysisDF(HybACSGOdata_Prev_10above_CC)
-
-HybACSGOdata_Prev_10below_BP_DF <- GOanalysisDF(HybACSGOdata_Prev_10below_BP)
-HybACSGOdata_Prev_10below_MF_DF <- GOanalysisDF(HybACSGOdata_Prev_10below_MF)
-HybACSGOdata_Prev_10below_CC_DF <- GOanalysisDF(HybACSGOdata_Prev_10below_CC)
-
-ACSnotHYBGOdata_Prev_10above_BP_DF <- GOanalysisDF(ACSnotHYBGOdata_Prev_10above_BP)
-ACSnotHYBGOdata_Prev_10above_MF_DF <- GOanalysisDF(ACSnotHYBGOdata_Prev_10above_MF)
-ACSnotHYBGOdata_Prev_10above_CC_DF <- GOanalysisDF(ACSnotHYBGOdata_Prev_10above_CC)
-
-ACSnotHYBGOdata_Prev_10below_BP_DF <- GOanalysisDF(ACSnotHYBGOdata_Prev_10below_BP)
-ACSnotHYBGOdata_Prev_10below_MF_DF <- GOanalysisDF(ACSnotHYBGOdata_Prev_10below_MF)
-ACSnotHYBGOdata_Prev_10below_CC_DF <- GOanalysisDF(ACSnotHYBGOdata_Prev_10below_CC)
-
-HYBnotACSGOdata_Prev_10above_BP_DF <- GOanalysisDF(HYBnotACSGOdata_Prev_10above_BP)
-HYBnotACSGOdata_Prev_10above_MF_DF <- GOanalysisDF(HYBnotACSGOdata_Prev_10above_MF)
-HYBnotACSGOdata_Prev_10above_CC_DF <- GOanalysisDF(HYBnotACSGOdata_Prev_10above_CC)
-
-HYBnotACSGOdata_Prev_10below_BP_DF <- GOanalysisDF(HYBnotACSGOdata_Prev_10below_BP)
-HYBnotACSGOdata_Prev_10below_MF_DF <- GOanalysisDF(HYBnotACSGOdata_Prev_10below_MF)
-HYBnotACSGOdata_Prev_10below_CC_DF <- GOanalysisDF(HYBnotACSGOdata_Prev_10below_CC)
-```
-
-```{r}
-GOanalysisMap(HYBnotACSGOdata_Prev_10below_BP, nodes=15)
-```
-
-
-```{r}
-print(showGroupDensity(ACSGOdata_10above_BP, "GO:0006520", ranks = T, rm.one = F))
-```
-```{r}
-print(showGroupDensity(HybGOdata_10above_BP, "GO:0019750", ranks = T, rm.one = F))
+print(showGroupDensity(DF.bm.sig.10above.godataBP, "GO:0009765", ranks = T, rm.one = F))
 ```
 
 
 
-#### KEGG
-#First get UIDs from gi's:
-```{r}
-###Create vectors of gi's:
-giAccessions <- df$Accession
-#remove gi accessions with alphas AKA nonconvertible
-giAccessions<-giAccessions[-grep(giAccessions, pattern = "[a-zA-Z]")]
-```
-
-#  GI to UID:
-```{r}
-#first, convert GI to UID
-#because more than 500, need to use epost first
-p <- epost(giAccessions, db = "protein")
-#efetch genpept file format for each UID, save to text file (requirement for epost>500)
-efetch(p, db="protein",retmode = "text", rettype="gp", outfile = "ACS_epost.txt")
-
-#read in UID text
-UIDVec<-read.delim(file="ACS_epost.txt", header = FALSE)
-#convert to vector
-UIDVec<-UIDVec[,1]
-#get gene IDs from full flat file
-UIDVec<-UIDVec[grep(UIDVec, pattern="GeneID")]
-#gsub out "GeneID:" to get accession number
-UIDVec<-gsub(UIDVec, pattern=".*:", replacement = "")
-#check that there is a UID for each GI
-length(UIDVec)==length(giAccessions)
-```
-
-```{r}
-#Merge UIDs back with data:
-UID_gi_DF <- data.frame("UID"=UIDVec, "gi"=giAccessions)
-DF_UID <- merge.data.frame(df, UID_gi_DF, by.x = "Accession", by.y = "gi")
-```
-```{r}
-#save data
-saveRDS(DF_UID, "DF_UID")
-```
-```{r}
-#read back in data
-DF_UID <- readRDS("DF_UID")
-```
 
 
-```{r}
-#Re-order DF columns to match LB:
-DF_UID_reorder <- DF_UID[,(c(1,12:17,28,2:11,18:20,26))]
-#Identify duplicate UIDs (protein isoforms):
-DF_dupes <- DF_UID_reorder$UID[duplicated(DF_UID_reorder$UID)]
-DF_dupes_unique <- unique(DF_dupes)
-
-#Sum signal for each duplicate UID (protein isoform):
-DF_dupes_sums <- data.frame(matrix(ncol = 14, nrow = length(DF_dupes_unique)))
-DF_dupes_sums$X1 <- DF_dupes_unique
-colnames(DF_dupes_sums) <- c("UID", colnames(DF_UID_reorder[,9:21]))
-for(i in 1:length(DF_dupes_unique)){
-  CS <- colSums(DF_UID_reorder[(DF_UID_reorder$UID==DF_dupes_unique[i]),9:21])
-  DF_dupes_sums[i,2:14] <- CS
-  }
-
-
-#Pick one radom row from each duplicate to keep header info from:
-UID_reorder_OneDupe <- DF_UID_reorder[!(duplicated(DF_UID_reorder$UID)),]
-UID_reorder_OneDupe <- UID_reorder_OneDupe[!(duplicated(UID_reorder_OneDupe$UID)),]
-
-#Reassign signal values for each duplicate to the summed values:
-for(i in 1:nrow(DF_dupes_sums)){
-  UID_reorder_OneDupe[UID_reorder_OneDupe$UID==DF_dupes_sums[i,1],9:21] <- DF_dupes_sums[i,2:14]
-  }
-```
-
-```{r}
-#Re-structure for input in Deseq2:
-UID_ACS_reorder_ForDeseq <- UID_reorder_OneDupe[,(c(17:18,10:11))]
-colnames(UID_ACS_reorder_ForDeseq) <- c("ACS.2", "ACS.3","B73.2", "B73.3")
-rownames(UID_ACS_reorder_ForDeseq) <- UID_reorder_OneDupe$UID
-
-#Create colData object for Deseq2:
-colData_ACS_DF <- data.frame("condition"= c("ACS","ACS", "B73", "B73"), stringsAsFactors = T)
-rownames(colData_ACS_DF)<- colnames(UID_ACS_reorder_ForDeseq)
-
-#Create countData object for Deseq2:
-countData_ACS_DF <- round(UID_ACS_reorder_ForDeseq)
-
-##Go through each row and determine if a value is zero
-row_ACS_sub = apply(countData_ACS_DF, 1, function(row) all(row !=0 ))
-##Subset
-countData_ACS_DF <- countData_ACS_DF[row_ACS_sub,]
-countData_ACS_DF <- as.matrix(countData_ACS_DF)
-
-#round to whole number (Deseq2 needs discrete "counts"):
-countData_ACS_DF_2 <- round(rescale(countData_ACS_DF, to=c(1,10000000)))
-```
-
-```{r}
-dds_ACS_DF = DESeqDataSetFromMatrix(countData=countData_ACS_DF_2,
-                             colData=colData_ACS_DF,
-                             design=~condition)
-dds_ACS_DF = DESeq(dds_ACS_DF)
-res_ACS_DF = results(dds_ACS_DF, contrast=c("condition", "ACS", "B73"))
-```
-```{r}
-# Make a color vector for all genes
-mycols_ACS_DF <- rep("grey30", nrow(res_ACS_DF) )
-
-# Color red the genes with absolute fold change above 0.1
-mycols_ACS_DF[abs(res_ACS_DF$log2FoldChange) > 0.137 ] <- "red"
-
-# Color blue those with adjusted p-value less than 0.05
-#  and absolute fold change more than 0.5
-mycols_ACS_DF[(abs(res_ACS_DF$padj) < 0.05)&(abs(res_ACS_DF$log2FoldChange) > 0.137) ] <- "blue"
-plot( res_ACS_DF$log2FoldChange, -log(res_ACS_DF$padj), col=mycols_ACS_DF, xlab="Log2(FoldChange)", ylab="-Log(P-value)" )
-```
-```{r}
-length(res_ACS_DF$pvalue)
-length(res_ACS_DF$pvalue[res_ACS_DF$pvalue<0.05])
-length(res_ACS_DF$padj)
-length(res_ACS_DF$padj[res_ACS_DF$padj<0.05])
-```
-```{r}
-length(mycols_ACS_DF[abs(res_ACS_DF$padj) <0.05 ])
-```
-```{r}
-length(mycols_ACS_DF[(abs(res_ACS_DF$log2FoldChange) > 0.137)])
-```
-```{r}
-length(mycols_ACS_DF[(abs(res_ACS_DF$padj) < 0.05)&(abs(res_ACS_DF$log2FoldChange) > 0.137) ])
-```
-
-
-
-```{r}
-FoldChanges_ACS_DF <- res_ACS_DF$log2FoldChange
-names(FoldChanges_ACS_DF) <- rownames(res_ACS_DF)
-head(FoldChanges_ACS_DF)
-```
-
-```{r}
-colnames(UID_reorder_OneDupe)
-```
-
-#Hyb
-```{r}
-#Re-structure for input in Deseq2:
-UID_reorder_OneDupe$MP1 <- rowMeans(UID_reorder_OneDupe[,c(9:13)])
-UID_reorder_OneDupe$MP2 <- rowMeans(UID_reorder_OneDupe[,c(9:13)])
-UID_HYB_reorder_ForDeseq <- UID_reorder_OneDupe[,(c(14:15,23:24))]
-colnames(UID_HYB_reorder_ForDeseq) <- c("HYB.1", "HYB.2", "MP.1", "MP.2")
-rownames(UID_HYB_reorder_ForDeseq) <- UID_reorder_OneDupe$UID
-
-#Create colData object for Deseq2:
-colData_HYB_DF <- data.frame("condition"= c("HYB","HYB", "MP", "MP"), stringsAsFactors = T)
-rownames(colData_HYB_DF)<- colnames(UID_HYB_reorder_ForDeseq)
-
-#Create countData object for Deseq2:
-countData_HYB_DF <- round(UID_HYB_reorder_ForDeseq)
-
-##Go through each row and determine if a value is zero
-row_HYB_sub = apply(countData_HYB_DF, 1, function(row) all(row !=0 ))
-##Subset
-countData_HYB_DF <- countData_HYB_DF[row_HYB_sub,]
-countData_HYB_DF <- as.matrix(countData_HYB_DF)
-
-#round to whole number (Deseq2 needs discrete "counts"):
-countData_HYB_DF_2 <- round(rescale(countData_HYB_DF, to=c(1,10000000)))
-```
-
-```{r}
-dds_HYB_DF = DESeqDataSetFromMatrix(countData=countData_HYB_DF_2,
-                             colData=colData_HYB_DF,
-                             design=~condition)
-dds_HYB_DF = DESeq(dds_HYB_DF)
-res_HYB_DF = results(dds_HYB_DF, contrast=c("condition", "HYB", "MP"))
-```
-```{r}
-# Make a color vector for all genes
-mycols_HYB_DF <- rep("grey30", nrow(res_HYB_DF) )
-
-# Color red the genes with absolute fold change above 0.1
-mycols_HYB_DF[abs(res_HYB_DF$log2FoldChange) > 0.137 ] <- "red"
-
-# Color blue those with adjusted p-value less than 0.05
-#  and absolute fold change more than 0.5
-mycols_HYB_DF[(abs(res_HYB_DF$padj) < 0.05)&(abs(res_HYB_DF$log2FoldChange) > 0.137) ] <- "blue"
-plot( res_HYB_DF$log2FoldChange, -log(res_HYB_DF$padj), col=mycols_HYB_DF, xlab="Log2(FoldChange)", ylab="-Log(P-value)" )
-```
-
-```{r}
-countData_HYB_DF_Log2FC <- UID_HYB_reorder_ForDeseq
-
-countData_HYB_DF_Log2FC$Hyb2MP.1 <- log2(countData_HYB_DF_Log2FC$HYB.1/countData_HYB_DF_Log2FC$MP.1)
-countData_HYB_DF_Log2FC$Hyb2MP.2 <- log2(countData_HYB_DF_Log2FC$HYB.2/countData_HYB_DF_Log2FC$MP.2)
-
-countData_HYB_DF_Log2FC<- countData_HYB_DF_Log2FC[,c(5:6)]
-```
-
-
-```{r}
-countData_ACS_DF_Log2FC<- UID_ACS_reorder_ForDeseq
-
-countData_ACS_DF_Log2FC$acs2B73.2 <- log2(countData_ACS_DF_Log2FC$ACS.2/countData_ACS_DF_Log2FC$B73.2)
-countData_ACS_DF_Log2FC$acs2B73.3 <- log2(countData_ACS_DF_Log2FC$ACS.3/countData_ACS_DF_Log2FC$B73.3)
-```
-```{r}
-countData_ACS_DF_Log2FC <- countData_ACS_DF_Log2FC[,c(5:6)]
-```
-
-
-### Pathview and GAGE to create KEGG maps
-
-```{r}
-zma <- kegg.gsets(species = "zma", id.type = "entrez")
-
-keggres_HYB_DF <- gage(countData_HYB_DF_Log2FC, gsets = zma$kg.sets, samp = c(1:2), same.dir = F)
-keggres_ACS_DF <- gage(countData_ACS_DF_Log2FC, gsets = zma$kg.sets, samp = c(1:3), same.dir = F)
-```
-
-
-```{r}
-PVfun <- function(keggres, foldchangev){
-  dir.create(paste0((deparse(substitute(keggres))), "_",(deparse(substitute(foldchangev))),"/"))
-setwd(paste0((deparse(substitute(keggres))), "_",(deparse(substitute(foldchangev))),"/"))
-keggres_df = as.data.frame(keggres)
-
-keggres_df_sig = na.omit(keggres_df[(keggres_df$p.val<0.2),])
-
-V = rownames(keggres_df_sig)
-
-Va = substr(V, start = 1, stop = 8)
-
-Vb = substr(V, start = 10, stop = 100)
-
-Vm =cbind(Va, Vb)
-
-for(i in 1:nrow(Vm)){
-  pathview(gene.data=foldchangev, pathway.id=Vm[i,1], species = "zma", out.suffix = (paste0(Vm[i,2], (deparse(substitute(keggres))))))
-  }
-}
-```
-
-
-```{r}
-PVfun(keggres_HYB_DF$greater, countData_HYB_DF_Log2FC)
-```
-
-```{r}
-pathview(FoldChanges_HYB_DF, pathway.id = "zma00010", species="zma", out.suffix = "Glycolysis_HYB")
-```
 
 
