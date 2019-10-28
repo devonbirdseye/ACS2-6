@@ -860,7 +860,7 @@ all4df$sample <- factor(all4df$sample, levels = all4df$sample)
 ggplot(data=all4df, aes(x=sample, y=TMT, width=0.75)) + geom_bar(stat="identity", fill = c("blue3", "blue3", "blue3", "red3", "red3",  "purple4", "purple4", "green3", "green3", "green3")) + labs(title=V4acc)
 }
 ```
-```{r}
+```{r echo=F}
 PlotExp("Zm00001d045479")
 ```
 ```{r}
