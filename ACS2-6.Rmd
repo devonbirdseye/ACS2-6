@@ -7,8 +7,12 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+knit_hooks$set(optipng = hook_optipng)
 set.seed(586)
+```
 
+```{r libraries, include=FALSE}
 library(biomaRt)
 library(reshape2)
 library(scales)
@@ -704,8 +708,7 @@ df_NoDecoys_Biomart_epost_bioreps <- t(df_NoDecoys_Biomart_epost_bioreps)
 dist_bioreps <- dist(df_NoDecoys_Biomart_epost_bioreps, method = "euclidean")
 dist_bioreps
 ```
-
-```{r}
+```{r  optipng=''}
 #Plot distance matrix - bio reps
 res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
@@ -713,13 +716,13 @@ factoextra::fviz_dist(res.dist_bioreps,
 
 ggsave("bioreps_dist.png")
 ```
-```{r}
-#order=(c( "acs.2", "acs.3", "b73.1", "BM.1", "b73.2", "BM.2", "mo17.1", "acs.1", "b73.1", "mo17.2"))
+```{r  optipng=''}
 #build heirarchical clustering - bio reps
 hc_bioreps<- hclust(dist_bioreps, method = "ward.D2")
 hcd_bioreps <- as.dendrogram(hc_bioreps)
 plot(hcd_bioreps, type = "rectangle", ylab = "height")
 ```
+
 ```{r}
 #Build distance matrix of bio reps
 df_NoDecoys_Biomart_epost_bioreps_plastid <- df_NoDecoys_Biomart_epost
@@ -730,22 +733,19 @@ df_NoDecoys_Biomart_epost_bioreps_plastid <- t(df_NoDecoys_Biomart_epost_bioreps
 dist_bioreps_plastid <- dist(df_NoDecoys_Biomart_epost_bioreps_plastid, method = "euclidean")
 dist_bioreps_plastid
 ```
-
-```{r}
+```{r  optipng=''}
 #Plot distance matrix - bio reps
 res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_plastid, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
 ggsave("bioreps_plastid_dist.png")
 ```
-```{r}
-#order=(c( "acs.2", "acs.3", "b73.1", "BM.1", "b73.2", "BM.2", "mo17.1", "acs.1", "b73.1", "mo17.2"))
+```{r  optipng=''}
 #build heirarchical clustering - bio reps
 hc_bioreps_plastid<- hclust(dist_bioreps_plastid, method = "ward.D2")
 hcd_bioreps_plastid <- as.dendrogram(hc_bioreps_plastid)
 plot(hcd_bioreps_plastid, type = "rectangle", ylab = "height")
 ```
-
 
 ```{r}
 #Build distance matrix of bio reps
@@ -759,15 +759,14 @@ dist_bioreps_go.photo
 ```
 
 
-```{r}
+```{r  optipng=''}
 #Plot distance matrix - bio reps
 res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_go.photo, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
 ggsave("bioreps_nuclear_GO_photo_dist.png")
 ```
-```{r}
-#order=(c( "acs.2", "acs.3", "b73.1", "BM.1", "b73.2", "BM.2", "mo17.1", "acs.1", "b73.1", "mo17.2"))
+```{r  optipng=''}
 #build heirarchical clustering - bio reps
 hc_bioreps_go.photo<- hclust(dist_bioreps_go.photo)
 hcd_bioreps_go.photo <- as.dendrogram(hc_bioreps_go.photo)
@@ -794,46 +793,48 @@ dist_bioreps.m <- as.matrix(dist_bioreps)
 
 ```{r}
 library(RColorBrewer)
-heatmap(dist_bioreps_go.ribosome.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
-```
-```{r}
-heatmap(dist_bioreps_go.photo.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
-```
-```{r}
-heatmap(dist_bioreps_plastid.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 
-```{r}
+```{r  optipng=''}
+heatmap(dist_bioreps_go.ribosome.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+```{r  optipng=''}
+heatmap(dist_bioreps_go.photo.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+```{r  optipng=''}
+heatmap(dist_bioreps_plastid.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+```{r  optipng=''}
 heatmap(dist_bioreps.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
 ```
 
-```{r}
+```{r  optipng=''}
 #Plot distance matrix - bio reps
 res.dist_bioreps <- factoextra::get_dist(df_NoDecoys_Biomart_epost_bioreps_go.ribosome, stand = F, method = "euclidian")
 factoextra::fviz_dist(res.dist_bioreps, 
    gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
 ggsave("bioreps_nuclear_ribosomalprotein_dist.png")
 ```
-```{r}
+```{r  optipng=''}
 hc_bioreps_go.ribosome<- hclust(dist_bioreps_go.ribosome, method = "complete")
 hcd_bioreps_go.ribosome <- as.dendrogram(hc_bioreps_go.ribosome)
 plot(hcd_bioreps_go.ribosome, type = "rectangle", ylab = "height")
 ```
 
-```{r}
-df_NoDecoys_Biomart_epost_bioreps_go.photo.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.photo)
-heatmap(df_NoDecoys_Biomart_epost_bioreps_go.photo.t)
-```
-```{r}
-df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.ribosome)
-heatmap(df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t)
-```
 
-```{r}
+```{r  optipng=''}
 df_NoDecoys_Biomart_epost_bioreps.t <- t(df_NoDecoys_Biomart_epost_bioreps)
 heatmap(df_NoDecoys_Biomart_epost_bioreps.t)
 ```
-```{r}
+```{r  optipng=''}
+df_NoDecoys_Biomart_epost_bioreps_go.photo.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.photo)
+heatmap(df_NoDecoys_Biomart_epost_bioreps_go.photo.t)
+```
+```{r  optipng=''}
+df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t <- t(df_NoDecoys_Biomart_epost_bioreps_go.ribosome)
+heatmap(df_NoDecoys_Biomart_epost_bioreps_go.ribosome.t)
+```
+```{r  optipng=''}
 df_NoDecoys_Biomart_epost_bioreps_plastid.t <- t(df_NoDecoys_Biomart_epost_bioreps_plastid)
 heatmap(df_NoDecoys_Biomart_epost_bioreps_plastid.t)
 ```
@@ -851,7 +852,7 @@ all4df$sample <- factor(all4df$sample, levels = all4df$sample)
 ggplot(data=all4df, aes(x=sample, y=TMT, width=0.75)) + geom_bar(stat="identity", fill = c("blue3", "blue3", "blue3", "red3", "red3",  "purple4", "purple4", "green3", "green3", "green3")) + labs(title=V4acc)
 }
 ```
-```{r}
+```{r  optipng=''}
 PlotExp("Zm00001d045479")
 ```
 
