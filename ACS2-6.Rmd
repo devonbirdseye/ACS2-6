@@ -4,7 +4,7 @@ author: "Devon Birdseye"
 date: "10/3/2019"
 output: html_document
 ---
-#####Start at line 192 if environment is cleared
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 set.seed(586)
@@ -219,8 +219,11 @@ saveRDS(PrevSL_trim_epost, "PrevSL_trim_epost")
 
 ########### Re-start here after cleared environment
 ```{r Read df_NoDecoys_Biomart_epost RDS as DF}
-DF <- readRDS("df_NoDecoys_Biomart_epost")
+df_NoDecoys_Biomart_epost <- readRDS("df_NoDecoys_Biomart_epost")
+```
 
+```{r Re-order columns}
+DF <- df_NoDecoys_Biomart_epost
 DF<- DF[,c(1,2,42,44,18,3:12)]
 colnames(DF)<- c("GI", "RefSeqPep", "UID", "V4", "Protein", "b731", "b732", "b733", "mo171", "mo172", "bm1", "bm2", "acs1", "acs2", "acs3")
 ```
