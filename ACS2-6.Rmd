@@ -35,7 +35,7 @@ library(gridExtra)
 library(factoextra)
 library(EnvStats)
 ```
-
+## Data import and prep
 ```{r Read in data, eval=FALSE, echo=FALSE}
 df <- read.csv("CSVs/B73-Mo17-BM-ACS26 TMT10 100319.csv", stringsAsFactors = F)
 PrevSL <- read.csv("CSVs/Seedling Leaf TMT10 030419.csv", stringsAsFactors = F)
@@ -364,9 +364,11 @@ nrow(PrevSL_trim_epost2_NoDupUID)
 ```{r subset to hyb and acs l2fc DFs for KEGG}
 DF.bm.l2fc <- DF_NoDupUID[,28:29]
 DF.acs.l2fc <- DF_NoDupUID[,30:32]
+DF.bm.AND.acs.l2fc <- DF_NoDupUID[,28:32]
 
 rownames(DF.bm.l2fc) <- DF_NoDupUID$UID
 rownames(DF.acs.l2fc) <- DF_NoDupUID$UID
+rownames(DF.bm.AND.acs.l2fc) <- DF_NoDupUID$UID
 
 #Remove the one row of NA - dont know where this came from (?)
 DF.acs.sig.10below <- DF.acs.sig.10below[!(is.na(DF.acs.sig.10below$GI)),]
@@ -412,7 +414,11 @@ zma <- kegg.gsets(species = "zma", id.type = "entrez")
 
 keggres_HYB_DF <- gage(DF.bm.l2fc, gsets = zma$kg.sets, samp = c(1:2), same.dir = T)
 keggres_ACS_DF <- gage(DF.acs.l2fc, gsets = zma$kg.sets, samp = c(1:3), same.dir = T)
-keggres_PrevSL_DF <- gage(PrevSL_trim_epost2.bm.l2fc, gsets = zma$kg.sets, samp = c(1:3), same.dir = T)
+keggres_HYB.AND.ACS_DF <- gage(DF.bm.AND.acs.l2fc, gsets = zma$kg.sets, samp = c(1:5), same.dir = T)
+keggres_PrevSL_DF <- gage(PrevSL_trim_epost2.bm.l2fc, gsets = zma$kg.sets, samp = c(1:3), same.dir = F)
+```
+```{r}
+write.csv(keggres_PrevSL_DF$greater, "keggres_PrevSL_DF.csv")
 ```
 
 ### PVfun
@@ -435,6 +441,7 @@ for(i in 1:nrow(Vm)){
 ```
 
 
+
 ```{r PVfun run, eval=FALSE, echo=FALSE}
 PVfun(keggres_PrevSL_DF$greater, PrevSL_trim_epost2.bm.l2fc)
 PVfun(keggres_PrevSL_DF$less, PrevSL_trim_epost2.bm.l2fc)
@@ -447,69 +454,65 @@ PVfun(keggres_ACS_DF$less, DF.acs.l2fc)
 
 pathview(PrevSL_trim_epost2.bm.l2fc, pathway.id = "zma00010", species = "zma", out.suffix = "keggres_PrevSL_DF$less_Glycolysis")
 ```
+```{r}
+PVfun(keggres_HYB.AND.ACS_DF$less, DF.bm.AND.acs.l2fc)
+```
 
 
 ### Check which genes are significantly altered in a given KEGG term
-```{r Check which genes are significantly altered in a given KEGG term}
-gage::essGene(zma$kg.sets$`zma00860 Porphyrin and chlorophyll metabolism`, DF.acs.l2fc)
+```{r SelectSigKEGGgenes function}
+SelectSigKEGGgenes <- function(zma.kgsets.term, l2fc){
+  x <- gage::essGene(zma.kgsets.term, l2fc)
+  x$UID <- rownames(x)
+  x2 <- merge.data.frame(x, DF, by.x = "UID", by.y = "UID")
+  x2
+}
 ```
+```{r SelectSigKEGGgenes run}
+SelectSigKEGGgenes(zma$kg.sets$`zma04712 Circadian rhythm - plant`, DF.bm.l2fc)
+```
+
 
 
 ```{r Make .png images of KEGG pathway enrichment dataframes, eval=FALSE, echo=FALSE}
-keggres_HYB_DF_KEGGdf <- as.data.frame(keggres_HYB_DF$greater)
-keggres_HYB_DF_KEGGdf$KEGG <- rownames(keggres_HYB_DF_KEGGdf)
-keggres_HYB_DF_KEGGdf <- keggres_HYB_DF_KEGGdf[1:6,c(8,1:7)]
-
-png((paste0(c(deparse(substitute(keggres_HYB_DF_KEGGdf.greater))),".png")), height=300, width=1000)
-p<-tableGrob(keggres_HYB_DF_KEGGdf, rows = c())
+ExportKeggDFpng.HYB<- function(keggDF){
+  dir.create("KEGG.DFs/")
+  setwd("KEGG.DFs/")
+keggDF2 <- as.data.frame(keggDF)
+keggDF2$KEGG <- rownames(keggDF2)
+keggDF2 <- keggDF2[1:10,c(8,1:7)]
+png((paste0(c(deparse(substitute(keggDF))),".png")), height=300, width=1200)
+p<-tableGrob(keggDF2, rows = c())
 grid.arrange(p)
 dev.off()
-
-keggres_ACS_DF_KEGGdf <- as.data.frame(keggres_ACS_DF$greater)
-keggres_ACS_DF_KEGGdf$KEGG <- rownames(keggres_ACS_DF_KEGGdf)
-keggres_ACS_DF_KEGGdf <- keggres_ACS_DF_KEGGdf[1:6,c(9,1:8)]
-
-png((paste0(c(deparse(substitute(keggres_ACS_DF_KEGGdf.greater))),".png")), height=300, width=1000)
-p<-tableGrob(keggres_ACS_DF_KEGGdf, rows = c())
+}
+ExportKeggDFpng.ACS<- function(keggDF){
+  dir.create("KEGG.DFs/")
+  setwd("KEGG.DFs/")
+keggDF2 <- as.data.frame(keggDF)
+keggDF2$KEGG <- rownames(keggDF2)
+keggDF2 <- keggDF2[1:10,c(9,1:8)]
+png((paste0(c(deparse(substitute(keggDF))),".png")), height=300, width=1200)
+p<-tableGrob(keggDF2, rows = c())
 grid.arrange(p)
 dev.off()
-
-keggres_PrevSL_DF_KEGGdf <- as.data.frame(keggres_PrevSL_DF$greater)
-keggres_PrevSL_DF_KEGGdf$KEGG <- rownames(keggres_PrevSL_DF_KEGGdf)
-keggres_PrevSL_DF_KEGGdf <- keggres_PrevSL_DF_KEGGdf[1:6,c(9,1:8)]
-
-png((paste0(c(deparse(substitute(keggres_PrevSL_DF_KEGGdf.greater))),".png")), height=300, width=1000)
-p<-tableGrob(keggres_PrevSL_DF_KEGGdf, rows = c())
+}
+ExportKeggDFpng.HYB.AND.ACS<- function(keggDF){
+  dir.create("KEGG.DFs/")
+  setwd("KEGG.DFs/")
+keggDF2 <- as.data.frame(keggDF)
+keggDF2$KEGG <- rownames(keggDF2)
+keggDF2 <- keggDF2[1:10,c(11,1:10)]
+png((paste0(c(deparse(substitute(keggDF))),".png")), height=300, width=1200)
+p<-tableGrob(keggDF2, rows = c())
 grid.arrange(p)
 dev.off()
-
-keggres_HYB_DF_KEGGdf <- as.data.frame(keggres_HYB_DF$less)
-keggres_HYB_DF_KEGGdf$KEGG <- rownames(keggres_HYB_DF_KEGGdf)
-keggres_HYB_DF_KEGGdf <- keggres_HYB_DF_KEGGdf[1:10,c(8,1:7)]
-
-png((paste0(c(deparse(substitute(keggres_HYB_DF_KEGGdf.less))),".png")), height=300, width=1000)
-p<-tableGrob(keggres_HYB_DF_KEGGdf, rows = c())
-grid.arrange(p)
-dev.off()
-
-keggres_ACS_DF_KEGGdf <- as.data.frame(keggres_ACS_DF$less)
-keggres_ACS_DF_KEGGdf$KEGG <- rownames(keggres_ACS_DF_KEGGdf)
-keggres_ACS_DF_KEGGdf <- keggres_ACS_DF_KEGGdf[1:10,c(9,1:8)]
-
-png((paste0(c(deparse(substitute(keggres_ACS_DF_KEGGdf.less))),".png")), height=300, width=1000)
-p<-tableGrob(keggres_ACS_DF_KEGGdf, rows = c())
-grid.arrange(p)
-dev.off()
-
-keggres_PrevSL_DF_KEGGdf <- as.data.frame(keggres_PrevSL_DF$less)
-keggres_PrevSL_DF_KEGGdf$KEGG <- rownames(keggres_PrevSL_DF_KEGGdf)
-keggres_PrevSL_DF_KEGGdf <- keggres_PrevSL_DF_KEGGdf[1:6,c(9,1:8)]
-
-png((paste0(c(deparse(substitute(keggres_PrevSL_DF_KEGGdf.less))),".png")), height=300, width=1000)
-p<-tableGrob(keggres_PrevSL_DF_KEGGdf, rows = c())
-grid.arrange(p)
-dev.off()
+}
 ```
+```{r}
+ExportKeggDFpng.HYB.AND.ACS(keggres_HYB.AND.ACS_DF$greater)
+```
+
 
 ```{r KEGG:AminoAcidBio, eval=FALSE, echo=FALSE}
 BiosynthesisAAs <- pathview(gene.data = DF.bm.l2fc, pathway.id = "zma01230", species="zma", out.suffix = "BiosynthesisAAs_HYB", keys.align = "y", kegg.native = F, match.data = F, multi.state = T, same.layer = T, cex=0.125, afactor=3, map.null = T, expand.node = T)
@@ -914,4 +917,400 @@ PlotExp("Zm00001d045479")
 
 
 
+
+
+
+
+```{r}
+Redox <- read.csv("CSVs/B73-Mo17-BM-ACS26 TMT10 100319_redox.csv", stringsAsFactors = F)
+```
+```{r}
+Redox_PrevSL <- read.csv("CSVs/Seedling-Leaf-Cys-NEM-IAA-TMT6 050219.csv", stringsAsFactors = F)
+```
+
+```{r}
+colnames(Redox) <- c("nonCys.b73.1", "nonCys.b73.2", "nonCys.b73.3", "nonCys.mo17.1", "nonCys.mo17.2", "nonCys.bm.1", "nonCys.bm.2", "nonCys.acs.1", "nonCys.acs.2", "nonCys.acs.3", "fixedCys.b73.1", "fixedCys.b73.2", "fixedCys.b73.3", "fixedCys.mo17.1", "fixedCys.mo17.2", "fixedCys.bm.1", "fixedCys.bm.2", "fixedCys.acs.1", "fixedCys.acs.2", "fixedCys.acs.3","variableCys.b73.1", "variableCys.b73.2", "variableCys.b73.3", "variableCys.mo17.1", "variableCys.mo17.2", "variableCys.bm.1", "variableCys.bm.2", "variableCys.acs.1", "variableCys.acs.2", "variableCys.acs.3", "Peptide", "Group", "Score", "Accession", "Protein")
+```
+
+```{r}
+GeomeanSetCols <- function(df, rows){
+  x <- NULL
+  for(i in 1:nrow(df)){
+    v <- as.numeric(df[i, rows])
+    gm <- geoMean(v, na.rm = T)
+    x[i]<-gm
+  }
+  x
+}
+```
+
+```{r}
+Redox$nonCys.acs.1.nonCys.b73.1 <- Redox$nonCys.acs.1/Redox$nonCys.b73.1
+Redox$nonCys.acs.2.nonCys.b73.2 <- Redox$nonCys.acs.2/Redox$nonCys.b73.2
+Redox$nonCys.acs.3.nonCys.b73.3 <- Redox$nonCys.acs.3/Redox$nonCys.b73.3
+```
+```{r}
+Redox$variableCys.acs.1.variableCys.b73.1 <- Redox$variableCys.acs.1/Redox$variableCys.b73.1
+Redox$variableCys.acs.2.variableCys.b73.2 <- Redox$variableCys.acs.2/Redox$variableCys.b73.2
+Redox$variableCys.acs.3.variableCys.b73.3 <- Redox$variableCys.acs.3/Redox$variableCys.b73.3
+```
+```{r}
+Redox$fixedCys.acs.1.fixedCys.b73.1 <- Redox$fixedCys.acs.1/Redox$fixedCys.b73.1
+Redox$fixedCys.acs.2.fixedCys.b73.2 <- Redox$fixedCys.acs.2/Redox$fixedCys.b73.2
+Redox$fixedCys.acs.3.fixedCys.b73.3 <- Redox$fixedCys.acs.3/Redox$fixedCys.b73.3
+```
+```{r}
+Redox.WithNons <-Redox[!(Redox$nonCys.b73.1==0),]
+```
+
+
+```{r}
+Redox.WithNons$variableCys.acs.1.variableCys.b73.1_nonCys.acs.1.nonCys.b73.1 <- log2(Redox.WithNons$variableCys.acs.1.variableCys.b73.1/Redox.WithNons$nonCys.acs.1.nonCys.b73.1)
+
+Redox.WithNons$variableCys.acs.2.variableCys.b73.2_nonCys.acs.2.nonCys.b73.2 <- log2(Redox.WithNons$variableCys.acs.2.variableCys.b73.2/Redox.WithNons$nonCys.acs.2.nonCys.b73.2)
+
+Redox.WithNons$variableCys.acs.3.variableCys.b73.3_nonCys.acs.3.nonCys.b73.3 <- log2(Redox.WithNons$variableCys.acs.3.variableCys.b73.3/Redox.WithNons$nonCys.acs.3.nonCys.b73.3)
+
+
+Redox.WithNons$fixedCys.acs.1.fixedCys.b73.1_nonCys.acs.1.nonCys.b73.1 <- log2(Redox.WithNons$fixedCys.acs.1.fixedCys.b73.1/Redox.WithNons$nonCys.acs.1.nonCys.b73.1)
+
+Redox.WithNons$fixedCys.acs.2.fixedCys.b73.2_nonCys.acs.2.nonCys.b73.2 <- log2(Redox.WithNons$fixedCys.acs.2.fixedCys.b73.2/Redox.WithNons$nonCys.acs.2.nonCys.b73.2)
+
+Redox.WithNons$fixedCys.acs.3.fixedCys.b73.3_nonCys.acs.3.nonCys.b73.3 <- log2(Redox.WithNons$fixedCys.acs.3.fixedCys.b73.3/Redox.WithNons$nonCys.acs.3.nonCys.b73.3)
+```
+
+```{r}
+Redox.WithNons$variableCys.acs.variableCys.b73_nonCys.acs.nonCys.b73.mean <- rowMeans(Redox.WithNons[,45:47])
+```
+```{r}
+Redox.WithNons$fixedCys.acs.fixedCys.b73_nonCys.acs.nonCys.b73.mean <- rowMeans(Redox.WithNons[,48:50])
+```
+```{r}
+colMeans(Redox.WithNons[,51:52])
+```
+```{r}
+colnames(Redox.WithNons)
+```
+
+```{r}
+Redox.WithNons.VarNon <-Redox.WithNons[,c(34,45:47)]
+Redox.WithNons.VarNon.m <- melt(Redox.WithNons.VarNon)
+```
+```{r}
+Redox.WithNons.FixNon <-Redox.WithNons[,c(34,48:50)]
+Redox.WithNons.FixNon.m <- melt(Redox.WithNons.FixNon)
+```
+```{r}
+Redox.WithNons.VarFixNon.m <- cbind(Redox.WithNons.VarNon.m, Redox.WithNons.FixNon.m[,3])
+```
+```{r}
+colnames(Redox.WithNons.VarFixNon.m)  <- c("Accession", "variable", "Var", "Fix")
+```
+```{r}
+Redox.WithNons.VarFixNon.m <- Redox.WithNons.VarFixNon.m[(order(Redox.WithNons.VarFixNon.m$Var)),]
+```
+```{r}
+Redox.WithNons.VarFixNon.m.m <- melt(Redox.WithNons.VarFixNon.m)
+```
+```{r}
+colnames(Redox.WithNons.VarFixNon.m.m) <- c("Accession", "var1", "var2", "value")
+```
+```{r}
+Redox.WithNons.VarFixNon.m.m$order <- c((1:((nrow(Redox.WithNons.VarFixNon.m.m))/2)), (1:((nrow(Redox.WithNons.VarFixNon.m.m))/2)))
+```
+
+```{r}
+Redox.WithNons.NonCys <- Redox.WithNons[,c(34,36:38)]
+Redox.WithNons.NonCys.m <- melt(Redox.WithNons.NonCys)
+```
+```{r}
+Redox.WithNons.VarCys <- Redox.WithNons[,c(34,39:41)]
+Redox.WithNons.VarCys.m <- melt(Redox.WithNons.VarCys)
+```
+```{r}
+Redox.WithNons.FixCys <- Redox.WithNons[,c(34,42:44)]
+Redox.WithNons.FixCys.m <- melt(Redox.WithNons.FixCys)
+```
+```{r}
+Redox.WithNons.NonVarFix <- cbind(Redox.WithNons.NonCys.m, Redox.WithNons.VarCys.m[,3], Redox.WithNons.FixCys.m[,3])
+```
+```{r}
+colnames(Redox.WithNons.NonVarFix)  <- c("Accession", "variable","Non", "Var", "Fix")
+```
+
+
+```{r}
+library(plotly)
+```
+```{r}
+library(htmlwidgets)
+```
+```{r}
+axx <- list(
+  nticks = 5,
+  range = c(0,3.5)
+)
+
+axy <- list(
+  nticks = 5,
+  range = c(0,3.5)
+)
+
+axz <- list(
+  nticks = 5,
+  range = c(0,3.5)
+)
+
+
+p <- plot_ly(x = ~x, y = ~y, z = ~z, type = 'mesh3d') %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz))
+```
+
+```{r}
+plot_ly(x=Redox.WithNons.NonVarFix$Non, y=Redox.WithNons.NonVarFix$Var, z=Redox.WithNons.NonVarFix$Fix, type="scatter3d", mode="markers", color=Redox.WithNons.NonVarFix$variable, size = 1, alpha = .5)%>% 
+    layout(scene=list(aspectmode='cube', xaxis=axx,yaxis=axy,zaxis=axz))
+```
+
+```{r}
+ggplot(data=Redox.WithNons.NonVarFix, mapping = aes(x=Non, y = Fix, color=variable))+
+  geom_point()+
+  xlim(0.5,3)+
+  ylim(0.5,3)
+```
+
+
+```{r}
+ggplot(data=Redox.WithNons.FixNon.m, mapping = aes(x=value, color=variable))+
+  geom_density()+
+  theme(legend.position = "bottom")
+```
+
+
+```{r}
+Redox.WithNons2<-Redox[!(Redox$nonCys.b73.1==0),]
+```
+```{r}
+Redox.WithNons2$fixedCys.acs.1_nonCys.acs.1 <- Redox.WithNons2$fixedCys.acs.1/Redox.WithNons2$nonCys.acs.1
+Redox.WithNons2$fixedCys.acs.2_nonCys.acs.2 <- Redox.WithNons2$fixedCys.acs.2/Redox.WithNons2$nonCys.acs.2
+Redox.WithNons2$fixedCys.acs.3_nonCys.acs.3 <- Redox.WithNons2$fixedCys.acs.3/Redox.WithNons2$nonCys.acs.3
+
+Redox.WithNons2$fixedCys.b73.1_nonCys.b73.1 <- Redox.WithNons2$fixedCys.b73.1/Redox.WithNons2$nonCys.b73.1
+Redox.WithNons2$fixedCys.b73.2_nonCys.b73.2 <- Redox.WithNons2$fixedCys.b73.2/Redox.WithNons2$nonCys.b73.2
+Redox.WithNons2$fixedCys.b73.3_nonCys.b73.3 <- Redox.WithNons2$fixedCys.b73.3/Redox.WithNons2$nonCys.b73.3
+```
+```{r}
+Redox.WithNons2$variableCys.acs.1_nonCys.acs.1 <- Redox.WithNons2$variableCys.acs.1/Redox.WithNons2$nonCys.acs.1
+Redox.WithNons2$variableCys.acs.2_nonCys.acs.2 <- Redox.WithNons2$variableCys.acs.2/Redox.WithNons2$nonCys.acs.2
+Redox.WithNons2$variableCys.acs.3_nonCys.acs.3 <- Redox.WithNons2$variableCys.acs.3/Redox.WithNons2$nonCys.acs.3
+
+Redox.WithNons2$variableCys.b73.1_nonCys.b73.1 <- Redox.WithNons2$variableCys.b73.1/Redox.WithNons2$nonCys.b73.1
+Redox.WithNons2$variableCys.b73.2_nonCys.b73.2 <- Redox.WithNons2$variableCys.b73.2/Redox.WithNons2$nonCys.b73.2
+Redox.WithNons2$variableCys.b73.3_nonCys.b73.3 <- Redox.WithNons2$variableCys.b73.3/Redox.WithNons2$nonCys.b73.3
+```
+```{r}
+Redox.WithNons2.fixed.acs <- Redox.WithNons2[,c(34,45:47)]
+Redox.WithNons2.fixed.b73 <- Redox.WithNons2[,c(34,48:50)]
+Redox.WithNons2.variable.acs <- Redox.WithNons2[,c(34,51:53)]
+Redox.WithNons2.variable.b73 <- Redox.WithNons2[,c(34,54:56)]
+```
+```{r}
+Redox.WithNons2.fixed.acs.m <- melt(Redox.WithNons2.fixed.acs)
+Redox.WithNons2.fixed.b73.m <- melt(Redox.WithNons2.fixed.b73)
+Redox.WithNons2.variable.acs.m <- melt(Redox.WithNons2.variable.acs)
+Redox.WithNons2.variable.b73.m <- melt(Redox.WithNons2.variable.b73)
+```
+```{r}
+Redox.WithNons2.fixed.m <- cbind(Redox.WithNons2.fixed.acs.m, Redox.WithNons2.fixed.b73.m[,3])
+Redox.WithNons2.variable.m <- cbind(Redox.WithNons2.variable.acs.m, Redox.WithNons2.variable.b73.m[,3])
+
+colnames(Redox.WithNons2.fixed.m) <- c("Accession", "variable", "acs", "B73")
+colnames(Redox.WithNons2.variable.m) <- c("Accession", "variable", "acs", "B73")
+```
+```{r}
+ggplot(data=Redox.WithNons2.variable.m, mapping = aes(x=B73, y = acs, color=variable))+
+  geom_point()+
+  xlim(0,7.5)+
+  ylim(0,7.5)
+```
+
+
+
+# Plastid-encoded proteins
+```{r}
+PE <- read.csv("ACS_Plastid.csv", stringsAsFactors = F)
+```
+```{r}
+colnames(PE)
+```
+
+```{r}
+avgCV<-function(x){
+  B73CV<-(sd(x[1:3])/mean(x[1:3]))*100
+  Mo17CV<-(sd(x[4:5])/mean(x[4:5]))*100
+  BxMCV<-(sd(x[6:7])/mean(x[6:7]))*100
+  acsCV<-(sd(x[8:10])/mean(x[8:10]))*100
+  CV<--mean(c(B73CV, Mo17CV, BxMCV, acsCV))
+  CV
+}
+```
+```{r}
+PE.CV<-apply(PE[,2:11], 1, function(x) avgCV(x))
+names(PE.CV)<-PE[,1]
+```
+```{r}
+FC.bm.mp<-function(x){
+  #get mean of B73
+  B73Mean<-mean(x[1:3])
+  #get mean of Mo17
+  Mo17Mean<-mean(x[4:5])
+  #get mean of BxM
+  BxMMean<-mean(x[6:7])
+  #get midparent mean
+  MP<-mean(c(B73Mean, Mo17Mean))
+  #divide BxM by midparent mean
+  ret<-log(BxMMean/MP, base=2)
+  #return fold vector, with GI# as names
+  return(ret)
+}
+```
+```{r}
+FC.acs.b73<-function(x){
+  #get mean of B73
+  B73Mean<-mean(x[1:3])
+  #get mean of acs
+  acsMean<-mean(x[8:10])
+  ret<-log(B73Mean/acsMean, base=2)
+  #return fold vector, with GI# as names
+  return(ret)
+}
+```
+```{r}
+PE.FC.bm.mp <- apply(PE[,2:11], 1, function(x) FC.bm.mp(x))
+PE.FC.acs.b73 <- apply(PE[,2:11], 1, function(x) FC.acs.b73(x))
+```
+```{r}
+PE.FC.bm.mp.CV <- data.frame(cbind(PE.FC.bm.mp, PE.CV))
+PE.FC.acs.b73.CV <- data.frame(cbind(PE.FC.acs.b73, PE.CV))
+```
+```{r}
+colnames(PE.FC.bm.mp.CV) <- c("fold", "CV")
+colnames(PE.FC.acs.b73.CV) <- c("fold", "CV")
+```
+```{r}
+PE.df <- cbind(PE.FC.bm.mp.CV,PE.FC.acs.b73.CV)
+```
+```{r}
+PE.df <- 
+```
+
+
+```{r}
+library(cowplot)
+```
+
+```{r}
+ggCVVolcano(PE.FC.bm.mp.CV)
+```
+
+```{r}
+ggCVVolcano<-function(foldPvalDF, geneList=NULL, categories=NULL, title=NULL, zoom=c(2.5, -75)){
+  #saturate down to max fold
+  foldPvalDF[which(foldPvalDF[,"fold"]>zoom[1]),"fold"]<-zoom[1]
+  foldPvalDF[which(foldPvalDF[,"fold"]<(-zoom[1])),"fold"]<--zoom[1]
+  #saturate down to max CV
+  foldPvalDF[which(foldPvalDF[,"CV"]<(-75)),"CV"]<--75
+  #divide genes by membership in special list(s), if necessary
+  pointShape<-1
+  if(length(geneList)<1000&length(geneList)>0){pointShape<-19}
+  if(length(geneList)>0){
+    foldPvalDF<-foldPvalDF[which(foldPvalDF[,1]%in%geneList),]
+  }
+  #generate y and x axis limits for plots
+    xlims<-c(-zoom[1], zoom[1])
+    ylims<-c(0, zoom[2])
+  #if more than one category, create factor
+  if(length(categories)>0){
+    foldPvalDF<-cbind(foldPvalDF, category = rep("Other", times=nrow(foldPvalDF)))
+    #loop across categories, filling in values
+    for(i in 1:length(categories)){
+      foldPvalDF[which(foldPvalDF[,1]%in%categories[[i]]),4]<-names(categories[i])
+    }
+    foldPvalDF <- foldPvalDF[order(-as.numeric(factor(foldPvalDF[,4], levels=c(unique(names(categories)), "Other")))),]
+    if(length(categories)==3){shapeVec<-(c(19, 1, 19, 19))}
+    else{shapeVec<-c(19,19,19,19)}
+    #if more than one category, color points based on membership
+    #create scatter plot for central figure
+    scatter<-ggplot(foldPvalDF, aes(x=foldPvalDF$fold, y=foldPvalDF$CV, color=foldPvalDF$category))+
+    geom_point(aes(shape=category),alpha = 0.75)+
+    scale_colour_manual(values=c("cyan3", "black", "red", "darkorange"))+
+    scale_shape_manual(values=shapeVec)+
+    geom_vline(xintercept=0, linetype="dashed", color = "gray50")+
+    #geom_hline(yintercept=-20, linetype="dashed", color = "gray50")+
+    ylim(rev(ylims))+
+    xlim(xlims)+
+    theme_classic()+
+    theme(text = element_text(size=16), legend.position="bottom", legend.title=element_blank())+
+    theme(plot.caption = element_text(hjust = 0.5, size=14))+
+    guides(col=guide_legend(nrow=2,byrow=TRUE), shape=FALSE)+
+    labs(x = "BxM/MP", y="-avg(CV)", color="Category", caption=title)
+    #set up marginal density plot
+    densityplot<-axis_canvas(scatter, axis="x")+
+    geom_density(aes(fold, color=category), foldPvalDF, size=0.9)+
+    scale_color_manual(values=c("cyan3", "black", "red", "darkorange"))+
+    geom_vline(xintercept=0, linetype="dashed", color = "gray50")+
+    theme_void()+
+    theme(legend.title = element_blank())
+    #put two plots together
+    p <- insert_xaxis_grob(scatter, densityplot, position = "top")
+    #save
+    ggsave(plot=p, filename = "volcanoCVColor.tiff", device="tiff", dpi=600, width=6, height=6.83, compression = "lzw")
+  }
+  else{
+    #if one category
+    #set up scatter plot
+    scatter<-ggplot(foldPvalDF, aes(x=foldPvalDF$fold, y=foldPvalDF$CV))+
+    geom_point(alpha = 0.75, shape=pointShape)+
+    scale_colour_manual(values=c("black"))+
+    geom_vline(xintercept=0, linetype="dashed", color = "gray50")+
+    #geom_hline(yintercept=-20, linetype="dashed", color = "gray50")+
+    ylim(rev(ylims))+
+    xlim(xlims)+
+    theme_classic()+
+    theme(text = element_text(size=16), legend.position="bottom", plot.caption = element_text(hjust = 0.5, size=14))+
+    #theme(plot.margin = margin())+
+    #guides(col=guide_legend(nrow=2,byrow=TRUE))+
+    labs(x = "BxM/MP", y="-avg(CV)", caption=title)
+    #set up marginal density plot
+    densityplot<-axis_canvas(scatter, axis="x")+
+    geom_density(aes(fold), foldPvalDF, size=0.9)+
+    geom_vline(xintercept=0, linetype="dashed", color = "gray50")+
+    scale_color_manual(values=c("black"))+
+    theme_void()+
+    theme(legend.title = element_blank())
+    #put two plots together
+    p <- insert_xaxis_grob(scatter, densityplot, position = "top")
+    #save
+    ggsave(plot=p, filename = "volcanoCV.tiff", device="tiff", dpi=600, width=6, height=6, compression = "lzw")
+  }
+}
+```
+
+
+
+```{r}
+ggplot(PE.l2fc.cv.cbind, aes(x=AvgVal, y=cvVal, color=AvgVar)) +
+  geom_point()+
+  theme_light()+
+  theme(legend.position="bottom")+
+  xlab("log2(fc)")+
+  ylab("cv")
+```
+
+```{r}
+ggplot(data=test4, mapping = aes(x=test4$value, fill=variable))+
+  geom_histogram(binwidth=.015, position="dodge")
+```
+```{r}
+PE
+```
 
