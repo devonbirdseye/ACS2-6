@@ -981,16 +981,12 @@ Redox.WithNons$fixedCys.acs.3.fixedCys.b73.3_nonCys.acs.3.nonCys.b73.3 <- log2(R
 
 ```{r}
 Redox.WithNons$variableCys.acs.variableCys.b73_nonCys.acs.nonCys.b73.mean <- rowMeans(Redox.WithNons[,45:47])
-```
-```{r}
 Redox.WithNons$fixedCys.acs.fixedCys.b73_nonCys.acs.nonCys.b73.mean <- rowMeans(Redox.WithNons[,48:50])
 ```
 ```{r}
 colMeans(Redox.WithNons[,51:52])
 ```
-```{r}
-colnames(Redox.WithNons)
-```
+
 
 ```{r}
 Redox.WithNons.VarNon <-Redox.WithNons[,c(34,45:47)]
@@ -1002,49 +998,32 @@ Redox.WithNons.FixNon.m <- melt(Redox.WithNons.FixNon)
 ```
 ```{r}
 Redox.WithNons.VarFixNon.m <- cbind(Redox.WithNons.VarNon.m, Redox.WithNons.FixNon.m[,3])
-```
-```{r}
 colnames(Redox.WithNons.VarFixNon.m)  <- c("Accession", "variable", "Var", "Fix")
-```
-```{r}
 Redox.WithNons.VarFixNon.m <- Redox.WithNons.VarFixNon.m[(order(Redox.WithNons.VarFixNon.m$Var)),]
-```
-```{r}
 Redox.WithNons.VarFixNon.m.m <- melt(Redox.WithNons.VarFixNon.m)
-```
-```{r}
 colnames(Redox.WithNons.VarFixNon.m.m) <- c("Accession", "var1", "var2", "value")
-```
-```{r}
 Redox.WithNons.VarFixNon.m.m$order <- c((1:((nrow(Redox.WithNons.VarFixNon.m.m))/2)), (1:((nrow(Redox.WithNons.VarFixNon.m.m))/2)))
 ```
 
 ```{r}
 Redox.WithNons.NonCys <- Redox.WithNons[,c(34,36:38)]
 Redox.WithNons.NonCys.m <- melt(Redox.WithNons.NonCys)
-```
-```{r}
+
 Redox.WithNons.VarCys <- Redox.WithNons[,c(34,39:41)]
 Redox.WithNons.VarCys.m <- melt(Redox.WithNons.VarCys)
-```
-```{r}
+
 Redox.WithNons.FixCys <- Redox.WithNons[,c(34,42:44)]
 Redox.WithNons.FixCys.m <- melt(Redox.WithNons.FixCys)
-```
-```{r}
+
 Redox.WithNons.NonVarFix <- cbind(Redox.WithNons.NonCys.m, Redox.WithNons.VarCys.m[,3], Redox.WithNons.FixCys.m[,3])
-```
-```{r}
 colnames(Redox.WithNons.NonVarFix)  <- c("Accession", "variable","Non", "Var", "Fix")
 ```
 
-
 ```{r}
 library(plotly)
-```
-```{r}
 library(htmlwidgets)
 ```
+
 ```{r}
 axx <- list(
   nticks = 5,
@@ -1084,53 +1063,518 @@ ggplot(data=Redox.WithNons.FixNon.m, mapping = aes(x=value, color=variable))+
   geom_density()+
   theme(legend.position = "bottom")
 ```
+```{r}
+Redox_PrevSL.t <- Redox_PrevSL[,c(40,42:59)]
+```
+```{r}
+Redox_PrevSL.t.WithNons<-Redox_PrevSL.t[!(Redox_PrevSL.t$Non.Cys.B73.1==0),]
+```
+```{r}
+colnames(Redox_PrevSL.t.WithNons)
+```
+
+```{r}
+Redox_PrevSL.t.WithNons$Non.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons[,c(2,4)])
+Redox_PrevSL.t.WithNons$Non.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons[,c(3,5)])
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons[,c(8,10)])
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons[,c(9,11)])
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons[,c(14,16)])
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons[,c(15,17)])
+```
+
+```{r}
+Redox_PrevSL.t.WithNons$Non.Cys.B73.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 2:3)
+Redox_PrevSL.t.WithNons$Non.Cys.Mo17.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 4:5)
+Redox_PrevSL.t.WithNons$Non.Cys.BM.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 6:7)
+Redox_PrevSL.t.WithNons$Non.Cys.MP.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 20:21)
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 8:9)
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 10:11)
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 12:13)
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 22:23)
+Redox_PrevSL.t.WithNons$Reduced.Cys.B73.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 14:15)
+Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 16:17)
+Redox_PrevSL.t.WithNons$Reduced.Cys.BM.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 18:19)
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 24:25)
+```
+```{r}
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.1.Non.Cys.B73.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.1/Redox_PrevSL.t.WithNons$Non.Cys.B73.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.2.Non.Cys.B73.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.2/Redox_PrevSL.t.WithNons$Non.Cys.B73.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM.Non.Cys.B73.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM/Redox_PrevSL.t.WithNons$Non.Cys.B73.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.1.Non.Cys.Mo17.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.1/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.2.Non.Cys.Mo17.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.2/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM.Non.Cys.Mo17.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.1.Non.Cys.BM.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.1/Redox_PrevSL.t.WithNons$Non.Cys.BM.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.2.Non.Cys.BM.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.2/Redox_PrevSL.t.WithNons$Non.Cys.BM.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM.Non.Cys.BM.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM/Redox_PrevSL.t.WithNons$Non.Cys.BM.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.1.Non.Cys.MP.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.1/Redox_PrevSL.t.WithNons$Non.Cys.MP.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.2.Non.Cys.MP.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.2/Redox_PrevSL.t.WithNons$Non.Cys.MP.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM.Non.Cys.MP.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM/Redox_PrevSL.t.WithNons$Non.Cys.MP.GM
+```
+```{r}
+Redox_PrevSL.t.WithNons$Reduced.Cys.B73.1.Non.Cys.B73.1 <- Redox_PrevSL.t.WithNons$Reduced.Cys.B73.1/Redox_PrevSL.t.WithNons$Non.Cys.B73.1
+Redox_PrevSL.t.WithNons$Reduced.Cys.B73.2.Non.Cys.B73.2 <- Redox_PrevSL.t.WithNons$Reduced.Cys.B73.2/Redox_PrevSL.t.WithNons$Non.Cys.B73.2
+Redox_PrevSL.t.WithNons$Reduced.Cys.B73.GM.Non.Cys.B73.GM <- Redox_PrevSL.t.WithNons$Reduced.Cys.B73.GM/Redox_PrevSL.t.WithNons$Non.Cys.B73.GM
+
+Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.1.Non.Cys.Mo17.1 <- Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.1/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.1
+Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.2.Non.Cys.Mo17.2 <- Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.2/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.2
+Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.GM.Non.Cys.Mo17.GM <- Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.GM/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.GM
+
+Redox_PrevSL.t.WithNons$Reduced.Cys.BM.1.Non.Cys.BM.1 <- Redox_PrevSL.t.WithNons$Reduced.Cys.BM.1/Redox_PrevSL.t.WithNons$Non.Cys.BM.1
+Redox_PrevSL.t.WithNons$Reduced.Cys.BM.2.Non.Cys.BM.2 <- Redox_PrevSL.t.WithNons$Reduced.Cys.BM.2/Redox_PrevSL.t.WithNons$Non.Cys.BM.2
+Redox_PrevSL.t.WithNons$Reduced.Cys.BM.GM.Non.Cys.BM.GM <- Redox_PrevSL.t.WithNons$Reduced.Cys.BM.GM/Redox_PrevSL.t.WithNons$Non.Cys.BM.GM
+
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.1.Non.Cys.MP.1 <- Redox_PrevSL.t.WithNons$Reduced.Cys.MP.1/Redox_PrevSL.t.WithNons$Non.Cys.MP.1
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.2.Non.Cys.MP.2 <- Redox_PrevSL.t.WithNons$Reduced.Cys.MP.2/Redox_PrevSL.t.WithNons$Non.Cys.MP.2
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.GM.Non.Cys.MP.GM <- Redox_PrevSL.t.WithNons$Reduced.Cys.MP.GM/Redox_PrevSL.t.WithNons$Non.Cys.MP.GM
+```
+```{r}
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.1.Reduced.Cys.B73.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.1/Redox_PrevSL.t.WithNons$Reduced.Cys.B73.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.2.Reduced.Cys.B73.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.2/Redox_PrevSL.t.WithNons$Reduced.Cys.B73.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM.Reduced.Cys.B73.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM/Redox_PrevSL.t.WithNons$Reduced.Cys.B73.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.1.Reduced.Cys.Mo17.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.1/Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.2.Reduced.Cys.Mo17.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.2/Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM.Reduced.Cys.Mo17.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM/Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.1.Reduced.Cys.BM.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.1/Redox_PrevSL.t.WithNons$Reduced.Cys.BM.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.2.Reduced.Cys.BM.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.2/Redox_PrevSL.t.WithNons$Reduced.Cys.BM.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM.Reduced.Cys.BM.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM/Redox_PrevSL.t.WithNons$Reduced.Cys.BM.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.1.Reduced.Cys.MP.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.1/Redox_PrevSL.t.WithNons$Reduced.Cys.MP.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.2.Reduced.Cys.MP.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.2/Redox_PrevSL.t.WithNons$Reduced.Cys.MP.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM.Reduced.Cys.MP.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM/Redox_PrevSL.t.WithNons$Reduced.Cys.MP.GM
+```
+```{r}
+mean(Redox_PrevSL.t.WithNons$Non.Cys.B73.GM)
+mean(Redox_PrevSL.t.WithNons$Non.Cys.Mo17.GM)
+mean(Redox_PrevSL.t.WithNons$Non.Cys.BM.GM)
+mean(Redox_PrevSL.t.WithNons$Non.Cys.MP.GM)
+```
+```{r}
+mean(Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM)
+mean(Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM)
+mean(Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM)
+mean(Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM)
+```
+```{r}
+mean(Redox_PrevSL.t.WithNons$Reduced.Cys.B73.GM)
+mean(Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.GM)
+mean(Redox_PrevSL.t.WithNons$Reduced.Cys.BM.GM)
+mean(Redox_PrevSL.t.WithNons$Reduced.Cys.MP.GM)
+```
+```{r}
+mean(Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM.Non.Cys.B73.GM)
+mean(Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM.Non.Cys.Mo17.GM)
+mean(Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM.Non.Cys.BM.GM)
+mean(Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM.Non.Cys.MP.GM)
+```
+
+```{r}
+colnames(Redox_PrevSL.t.WithNons)
+```
+
+```{r}
+Redox_PrevSL.t.WithNons.Ox.Non.B73 <- Redox_PrevSL.t.WithNons[,c(1,38:40)]
+Redox_PrevSL.t.WithNons.Ox.Non.Mo17 <- Redox_PrevSL.t.WithNons[,c(1,41:43)]
+Redox_PrevSL.t.WithNons.Ox.Non.BM <- Redox_PrevSL.t.WithNons[,c(1,44:46)]
+Redox_PrevSL.t.WithNons.Ox.Non.MP <- Redox_PrevSL.t.WithNons[,c(1,47:49)]
+
+Redox_PrevSL.t.WithNons.Red.Non.B73 <- Redox_PrevSL.t.WithNons[,c(1,50:52)]
+Redox_PrevSL.t.WithNons.Red.Non.Mo17 <- Redox_PrevSL.t.WithNons[,c(1,53:55)]
+Redox_PrevSL.t.WithNons.Red.Non.BM <- Redox_PrevSL.t.WithNons[,c(1,56:58)]
+Redox_PrevSL.t.WithNons.Red.Non.MP <- Redox_PrevSL.t.WithNons[,c(1,59:61)]
+
+Redox_PrevSL.t.WithNons.Ox.Red.B73 <- Redox_PrevSL.t.WithNons[,c(1,62:64)]
+Redox_PrevSL.t.WithNons.Ox.Red.Mo17 <- Redox_PrevSL.t.WithNons[,c(1,65:67)]
+Redox_PrevSL.t.WithNons.Ox.Red.BM <- Redox_PrevSL.t.WithNons[,c(1,68:70)]
+Redox_PrevSL.t.WithNons.Ox.Red.MP <- Redox_PrevSL.t.WithNons[,c(1,71:73)]
+```
+
+```{r}
+Redox_PrevSL.t.WithNons.Ox.Non.B73.m <- melt(Redox_PrevSL.t.WithNons.Ox.Non.B73)
+Redox_PrevSL.t.WithNons.Ox.Non.Mo17.m <- melt(Redox_PrevSL.t.WithNons.Ox.Non.Mo17)
+Redox_PrevSL.t.WithNons.Ox.Non.BM.m <- melt(Redox_PrevSL.t.WithNons.Ox.Non.BM)
+Redox_PrevSL.t.WithNons.Ox.Non.MP.m <- melt(Redox_PrevSL.t.WithNons.Ox.Non.MP)
+
+Redox_PrevSL.t.WithNons.Red.Non.B73.m <- melt(Redox_PrevSL.t.WithNons.Red.Non.B73)
+Redox_PrevSL.t.WithNons.Red.Non.Mo17.m <- melt(Redox_PrevSL.t.WithNons.Red.Non.Mo17)
+Redox_PrevSL.t.WithNons.Red.Non.BM.m <- melt(Redox_PrevSL.t.WithNons.Red.Non.BM)
+Redox_PrevSL.t.WithNons.Red.Non.MP.m <- melt(Redox_PrevSL.t.WithNons.Red.Non.MP)
+
+Redox_PrevSL.t.WithNons.Ox.Red.B73.m <- melt(Redox_PrevSL.t.WithNons.Ox.Red.B73)
+Redox_PrevSL.t.WithNons.Ox.Red.Mo17.m <- melt(Redox_PrevSL.t.WithNons.Ox.Red.Mo17)
+Redox_PrevSL.t.WithNons.Ox.Red.BM.m <- melt(Redox_PrevSL.t.WithNons.Ox.Red.BM)
+Redox_PrevSL.t.WithNons.Ox.Red.MP.m <- melt(Redox_PrevSL.t.WithNons.Ox.Red.MP)
+```
+```{r}
+Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m <- cbind(Redox_PrevSL.t.WithNons.Ox.Non.B73.m, Redox_PrevSL.t.WithNons.Ox.Non.Mo17.m[,3], Redox_PrevSL.t.WithNons.Ox.Non.BM.m[,3], Redox_PrevSL.t.WithNons.Ox.Non.MP.m[,3])
+Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m <- cbind(Redox_PrevSL.t.WithNons.Red.Non.B73.m, Redox_PrevSL.t.WithNons.Red.Non.Mo17.m[,3], Redox_PrevSL.t.WithNons.Red.Non.BM.m[,3], Redox_PrevSL.t.WithNons.Red.Non.MP.m[,3])
+Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m <- cbind(Redox_PrevSL.t.WithNons.Ox.Red.B73.m, Redox_PrevSL.t.WithNons.Ox.Red.Mo17.m[,3], Redox_PrevSL.t.WithNons.Ox.Red.BM.m[,3], Redox_PrevSL.t.WithNons.Ox.Red.MP.m[,3])
+colnames(Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m) <- c("Accession", "ratio", "B73", "Mo17", "BM", "MP")
+colnames(Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m) <- c("Accession", "ratio", "B73", "Mo17", "BM", "MP")
+colnames(Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m) <- c("Accession", "ratio", "B73", "Mo17", "BM", "MP")
+```
+
+```{r}
+Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m$ratio<- c(rep("rep1", 790), rep("rep2", 790), rep("GM", 790))
+Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m$ratio<- c(rep("rep1", 790), rep("rep2", 790), rep("GM", 790))
+Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m$ratio<- c(rep("rep1", 790), rep("rep2", 790), rep("GM", 790))
+```
+```{r}
+dir.create("Redox_PrevSL.t.WithNons.Plots")
+```
+
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m$ratio)),], mapping = aes(x=(MP), y = (BM), color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE, size=.4)+
+  theme_bw()+
+  theme(legend.position = "bottom")+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  xlab("Mid-parent oxidized/non")+
+  ylab("BxM oxidized/non")+
+  geom_abline(slope = 1, color="grey", size=.5)+
+  xlim(0,70)+
+  ylim(0,70)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Ox.Non.MP.BM.png", width = 4.5)
+```
+
+
+```{r}
+Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM <- Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m[(grep("GM",Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m$ratio)),]
+Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM.m <- melt(Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM)
+```
+```{r}
+Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM <- Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m[(grep("GM",Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m$ratio)),]
+Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM.m <- melt(Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM)
+```
+
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM.m[grep("BM|MP",Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM.m$variable),], mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)+
+xlab("log2(reduced/non)")
+ggsave("Redox_PrevSL.t.WithNons.Red.Non.BM.MP.density.png", width = 8, height = 2)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM.m[-grep("BM|MP",Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM.m$variable),], mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)+
+xlab("log2(reduced/non)")
+ggsave("Redox_PrevSL.t.WithNons.Red.Non.b73.mo17.density.png", width = 8, height = 2)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM.m[grep("BM|MP",Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM.m$variable),], mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)+
+  xlab("log2(oxidized/non)")
+ggsave("Redox_PrevSL.t.WithNons.Ox.Non.BM.MP.density.png", width = 8, height = 2)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM.m[-grep("BM|MP",Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM.m$variable),], mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)+
+  xlab("log2(oxidized/non)")
+ggsave("Redox_PrevSL.t.WithNons.Ox.Non.b73.mo17.density.png", width = 8, height = 2)
+```
+
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m$ratio)),], mapping = aes(x=B73, y = Mo17, color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE, size=.4)+
+  theme_bw()+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  ylab("Mo17 oxidized/non")+
+  xlab("B73 oxidized/non")+
+  geom_abline(slope = 1, color="grey", size=.5)+
+  xlim(0,65)+
+  ylim(0,65)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Ox.Non.B73.Mo17.png", width = 4.5)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m$ratio)),], mapping = aes(x=(MP), y=(BM), color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE, size=.4)+
+  theme_bw()+
+  theme(legend.position = "bottom")+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  xlab("Mid-parent reduced/non")+
+  ylab("BxM reduced/non")+
+  geom_abline(slope = 1, color="grey", size=.5)+
+  xlim(0,150)+
+  ylim(0,150)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Red.Non.BM.MP.png", width = 4.5)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m$ratio)),], mapping = aes(x=B73, y = Mo17, color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE,size=.4)+
+  theme_bw()+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  ylab("Mo17 reduced/non)")+
+  xlab("B73 reduced/non")+
+  geom_abline(slope = 1, color="black", alpha=0.4, size=.5)+
+  xlim(0,180)+
+  ylim(0,180)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Red.Non.B73.Mo17.png", width = 4.5)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m$ratio)),], mapping = aes(x=B73, y = Mo17, color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE, size=.4)+
+  theme_bw()+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  ylab("Mo17 oxidized/red")+
+  xlab("B73 oxidized/red")+
+  geom_abline(slope = 1, color="black", alpha=0.4, size=.5)+
+  xlim(0,4500)+
+  ylim(0,4500)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Ox.Red.B73.Mo17.png", width = 4.5)
+```
+
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m$ratio)),], mapping = aes(x=(MP), y = (BM), color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE, size=.4)+
+  theme_bw()+ 
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  xlab("Mid-Parent oxidized/red")+
+  ylab("BxM oxidized/red")+
+  geom_abline(slope = 1, color="grey", size=.5)+
+  xlim(0,5000)+
+  ylim(0,5000)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Ox.Red.MP.BM.png", width = 4.5)
+```
+
+```{r}
+Redox_PrevSL.t.WithNons2<-Redox_PrevSL.t[!(Redox_PrevSL.t$Non.Cys.B73.1==0),]
+```
+```{r}
+colnames(Redox_PrevSL.t.WithNons2)
+```
+
+```{r}
+Redox_PrevSL.t.WithNons2$Non.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(2,4)])
+Redox_PrevSL.t.WithNons2$Non.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(3,5)])
+Redox_PrevSL.t.WithNons2$Oxidized.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(8,10)])
+Redox_PrevSL.t.WithNons2$Oxidized.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(9,11)])
+Redox_PrevSL.t.WithNons2$Reduced.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(14,16)])
+Redox_PrevSL.t.WithNons2$Reduced.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(15,17)])
+```
+
+
+```{r}
+Redox_PrevSL.t.WithNons2$l2.Non.Cys.B73.1.Non.Cys.Mo17.1 <- log2(Redox_PrevSL.t.WithNons2$Non.Cys.B73.1/Redox_PrevSL.t.WithNons2$Non.Cys.Mo17.1)
+Redox_PrevSL.t.WithNons2$l2.Non.Cys.B73.2.Non.Cys.Mo17.2 <- log2(Redox_PrevSL.t.WithNons2$Non.Cys.B73.2/Redox_PrevSL.t.WithNons2$Non.Cys.Mo17.2)
+
+Redox_PrevSL.t.WithNons2$l2.Oxidized.Cys.B73.1.Oxidized.Cys.Mo17.1 <- log2(Redox_PrevSL.t.WithNons2$Oxidized.Cys.B73.1/Redox_PrevSL.t.WithNons2$Oxidized.Cys.Mo17.1)
+Redox_PrevSL.t.WithNons2$l2.Oxidized.Cys.B73.2.Oxidized.Cys.Mo17.2 <- log2(Redox_PrevSL.t.WithNons2$Oxidized.Cys.B73.2/Redox_PrevSL.t.WithNons2$Oxidized.Cys.Mo17.2)
+
+Redox_PrevSL.t.WithNons2$l2.Reduced.Cys.B73.1.Reduced.Cys.Mo17.1 <- log2(Redox_PrevSL.t.WithNons2$Reduced.Cys.B73.1/Redox_PrevSL.t.WithNons2$Reduced.Cys.Mo17.1)
+Redox_PrevSL.t.WithNons2$l2.Reduced.Cys.B73.2.Reduced.Cys.Mo17.2 <- log2(Redox_PrevSL.t.WithNons2$Reduced.Cys.B73.2/Redox_PrevSL.t.WithNons2$Reduced.Cys.Mo17.2)
+```
+```{r}
+Redox_PrevSL.t.WithNons2$l2.Non.Cys.BM.1.Non.Cys.MP.1 <- log2(Redox_PrevSL.t.WithNons2$Non.Cys.BM.1/Redox_PrevSL.t.WithNons2$Non.Cys.MP.1)
+Redox_PrevSL.t.WithNons2$l2.Non.Cys.BM.2.Non.Cys.MP.2 <- log2(Redox_PrevSL.t.WithNons2$Non.Cys.BM.2/Redox_PrevSL.t.WithNons2$Non.Cys.MP.2)
+
+Redox_PrevSL.t.WithNons2$l2.Oxidized.Cys.BM.1.Oxidized.Cys.MP.1 <- log2(Redox_PrevSL.t.WithNons2$Oxidized.Cys.BM.1/Redox_PrevSL.t.WithNons2$Oxidized.Cys.MP.1)
+Redox_PrevSL.t.WithNons2$l2.Oxidized.Cys.BM.2.Oxidized.Cys.MP.2 <- log2(Redox_PrevSL.t.WithNons2$Oxidized.Cys.BM.2/Redox_PrevSL.t.WithNons2$Oxidized.Cys.MP.2)
+
+Redox_PrevSL.t.WithNons2$l2.Reduced.Cys.BM.1.Reduced.Cys.MP.1 <- log2(Redox_PrevSL.t.WithNons2$Reduced.Cys.BM.1/Redox_PrevSL.t.WithNons2$Reduced.Cys.MP.1)
+Redox_PrevSL.t.WithNons2$l2.Reduced.Cys.BM.2.Reduced.Cys.MP.2 <- log2(Redox_PrevSL.t.WithNons2$Reduced.Cys.BM.2/Redox_PrevSL.t.WithNons2$Reduced.Cys.MP.2)
+```
+```{r}
+colnames(Redox_PrevSL.t.WithNons2)
+```
+
+```{r}
+Redox_PrevSL.t.WithNons2.m <- cbind(melt(Redox_PrevSL.t.WithNons2[,c(1,26,27)]), (melt(Redox_PrevSL.t.WithNons2[,c(1,28,29)]))[,3], (melt(Redox_PrevSL.t.WithNons2[,c(1,30,31)]))[,3], (melt(Redox_PrevSL.t.WithNons2[,c(1,32,33)]))[,3], (melt(Redox_PrevSL.t.WithNons2[,c(1,34,35)]))[,3], (melt(Redox_PrevSL.t.WithNons2[,c(1,36,37)]))[,3])
+```
+
+```{r}
+colnames(Redox_PrevSL.t.WithNons2.m) <- c("Accession","ratio", "log2(B73non/Mo17non)", "log2(B73ox/Mo17ox)", "log2(B73red/Mo17red)", "log2(BMnon/MPnon)", "log2(BMox/MPox)", "log2(BMred/MPred)")
+```
+```{r}
+Redox_PrevSL.t.WithNons2.m$ratio <- c(rep("B73.1/Mo17.1", 790), rep("B73.2/Mo17.2", 790))
+```
+
+```{r}
+Plot_Redox_PrevSL.t.WithNons2.m <- function(X,Y){
+  dir.create("Plot_Redox_PrevSL.t.WithNons2.m")
+  setwd("Plot_Redox_PrevSL.t.WithNons2.m")
+  nameX <- deparse(substitute(X))
+  nameY <- deparse(substitute(Y))
+  nameX2 <- substr(nameX, start = 29, stop=((nchar(nameX))-1))
+  nameY2 <- substr(nameY, start = 29, stop=((nchar(nameY))-1))
+  nameX3 <- str_replace_all(nameX2, "[:punct:]", "_")
+  nameY3 <- str_replace_all(nameY2, "[:punct:]", "_")
+ggplot(data=Redox_PrevSL.t.WithNons2.m, mapping = aes(x=X, y = Y, color=ratio))+
+  geom_point(size=.75, alpha=0.4)+
+  theme_light()+
+  xlab(nameX2)+
+  ylab(nameY2)+
+  scale_x_continuous(limits=c(min(X,Y), max(X,Y))) +
+  scale_y_continuous(limits=c(min(X,Y), max(X,Y))) +
+  theme(aspect.ratio=1)+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+
+  theme(legend.position = "bottom")+
+  geom_abline(slope = 0, color="darkgrey", size=.5)+
+  geom_abline(slope = 1, color="grey50", size=.5, linetype="dashed")+
+  geom_vline(xintercept = 0, color="darkgrey", size=.5)
+ggsave(paste0(nameX3, ".", nameY3, ".png"))
+}
+```
+```{r}
+Plot_Redox_PrevSL.t.WithNons2.m(Redox_PrevSL.t.WithNons2.m$`log2(BMox/MPox)`, Redox_PrevSL.t.WithNons2.m$`log2(BMred/MPred)`)
+```
+
 
 
 ```{r}
 Redox.WithNons2<-Redox[!(Redox$nonCys.b73.1==0),]
 ```
+
+```{r}
+Redox.WithNons2$nonCys.b73.GM <- GeomeanSetCols(Redox.WithNons2, 1:3)
+Redox.WithNons2$nonCys.acs.GM <- GeomeanSetCols(Redox.WithNons2, 8:10)
+Redox.WithNons2$fixedCys.b73.GM <- GeomeanSetCols(Redox.WithNons2, 11:13)
+Redox.WithNons2$fixedCys.acs.GM <- GeomeanSetCols(Redox.WithNons2, 18:20)
+Redox.WithNons2$variableCys.b73.GM <- GeomeanSetCols(Redox.WithNons2, 21:23)
+Redox.WithNons2$variableCys.acs.GM <- GeomeanSetCols(Redox.WithNons2, 28:30)
+```
+
 ```{r}
 Redox.WithNons2$fixedCys.acs.1_nonCys.acs.1 <- Redox.WithNons2$fixedCys.acs.1/Redox.WithNons2$nonCys.acs.1
 Redox.WithNons2$fixedCys.acs.2_nonCys.acs.2 <- Redox.WithNons2$fixedCys.acs.2/Redox.WithNons2$nonCys.acs.2
 Redox.WithNons2$fixedCys.acs.3_nonCys.acs.3 <- Redox.WithNons2$fixedCys.acs.3/Redox.WithNons2$nonCys.acs.3
+Redox.WithNons2$fixedCys.acs.GM_nonCys.acs.GM <- Redox.WithNons2$fixedCys.acs.GM/Redox.WithNons2$nonCys.acs.GM
 
 Redox.WithNons2$fixedCys.b73.1_nonCys.b73.1 <- Redox.WithNons2$fixedCys.b73.1/Redox.WithNons2$nonCys.b73.1
 Redox.WithNons2$fixedCys.b73.2_nonCys.b73.2 <- Redox.WithNons2$fixedCys.b73.2/Redox.WithNons2$nonCys.b73.2
 Redox.WithNons2$fixedCys.b73.3_nonCys.b73.3 <- Redox.WithNons2$fixedCys.b73.3/Redox.WithNons2$nonCys.b73.3
+Redox.WithNons2$fixedCys.b73.GM_nonCys.b73.GM <- Redox.WithNons2$fixedCys.b73.GM/Redox.WithNons2$nonCys.b73.GM
 ```
 ```{r}
 Redox.WithNons2$variableCys.acs.1_nonCys.acs.1 <- Redox.WithNons2$variableCys.acs.1/Redox.WithNons2$nonCys.acs.1
 Redox.WithNons2$variableCys.acs.2_nonCys.acs.2 <- Redox.WithNons2$variableCys.acs.2/Redox.WithNons2$nonCys.acs.2
 Redox.WithNons2$variableCys.acs.3_nonCys.acs.3 <- Redox.WithNons2$variableCys.acs.3/Redox.WithNons2$nonCys.acs.3
+Redox.WithNons2$variableCys.acs.GM_nonCys.acs.GM <- Redox.WithNons2$variableCys.acs.GM/Redox.WithNons2$nonCys.acs.GM
 
 Redox.WithNons2$variableCys.b73.1_nonCys.b73.1 <- Redox.WithNons2$variableCys.b73.1/Redox.WithNons2$nonCys.b73.1
 Redox.WithNons2$variableCys.b73.2_nonCys.b73.2 <- Redox.WithNons2$variableCys.b73.2/Redox.WithNons2$nonCys.b73.2
 Redox.WithNons2$variableCys.b73.3_nonCys.b73.3 <- Redox.WithNons2$variableCys.b73.3/Redox.WithNons2$nonCys.b73.3
+Redox.WithNons2$variableCys.b73.GM_nonCys.b73.GM <- Redox.WithNons2$variableCys.b73.GM/Redox.WithNons2$nonCys.b73.GM
 ```
 ```{r}
-Redox.WithNons2.fixed.acs <- Redox.WithNons2[,c(34,45:47)]
-Redox.WithNons2.fixed.b73 <- Redox.WithNons2[,c(34,48:50)]
-Redox.WithNons2.variable.acs <- Redox.WithNons2[,c(34,51:53)]
-Redox.WithNons2.variable.b73 <- Redox.WithNons2[,c(34,54:56)]
+Redox.WithNons2$fixedCys.acs.1_variableCys.acs.1 <- Redox.WithNons2$fixedCys.acs.1/Redox.WithNons2$variableCys.acs.1
+Redox.WithNons2$fixedCys.acs.2_variableCys.acs.2 <- Redox.WithNons2$fixedCys.acs.2/Redox.WithNons2$variableCys.acs.2
+Redox.WithNons2$fixedCys.acs.3_variableCys.acs.3 <- Redox.WithNons2$fixedCys.acs.3/Redox.WithNons2$variableCys.acs.3
+Redox.WithNons2$fixedCys.acs.GM_variableCys.acs.GM <- Redox.WithNons2$fixedCys.acs.GM/Redox.WithNons2$variableCys.acs.GM
+
+Redox.WithNons2$fixedCys.b73.1_variableCys.b73.1 <- Redox.WithNons2$fixedCys.b73.1/Redox.WithNons2$variableCys.b73.1
+Redox.WithNons2$fixedCys.b73.2_variableCys.b73.2 <- Redox.WithNons2$fixedCys.b73.2/Redox.WithNons2$variableCys.b73.2
+Redox.WithNons2$fixedCys.b73.3_variableCys.b73.3 <- Redox.WithNons2$fixedCys.b73.3/Redox.WithNons2$variableCys.b73.3
+Redox.WithNons2$fixedCys.b73.GM_variableCys.b73.GM <- Redox.WithNons2$fixedCys.b73.GM/Redox.WithNons2$variableCys.b73.GM
 ```
+```{r}
+colnames(Redox.WithNons2)
+```
+
+```{r}
+#change cols
+Redox.WithNons2.fixed.acs <- Redox.WithNons2[,c(34,51:54)]
+Redox.WithNons2.fixed.b73 <- Redox.WithNons2[,c(34,55:58)]
+Redox.WithNons2.variable.acs <- Redox.WithNons2[,c(34,59:62)]
+Redox.WithNons2.variable.b73 <- Redox.WithNons2[,c(34,63:66)]
+Redox.WithNons2.fix.var.acs <- Redox.WithNons2[,c(34,67:70)]
+Redox.WithNons2.fix.var.b73 <- Redox.WithNons2[,c(34,71:74)]
+```
+
 ```{r}
 Redox.WithNons2.fixed.acs.m <- melt(Redox.WithNons2.fixed.acs)
 Redox.WithNons2.fixed.b73.m <- melt(Redox.WithNons2.fixed.b73)
 Redox.WithNons2.variable.acs.m <- melt(Redox.WithNons2.variable.acs)
 Redox.WithNons2.variable.b73.m <- melt(Redox.WithNons2.variable.b73)
+Redox.WithNons2.fix.var.acs.m <- melt(Redox.WithNons2.fix.var.acs)
+Redox.WithNons2.fix.var.b73.m <- melt(Redox.WithNons2.fix.var.b73)
 ```
+
 ```{r}
 Redox.WithNons2.fixed.m <- cbind(Redox.WithNons2.fixed.acs.m, Redox.WithNons2.fixed.b73.m[,3])
 Redox.WithNons2.variable.m <- cbind(Redox.WithNons2.variable.acs.m, Redox.WithNons2.variable.b73.m[,3])
+Redox.WithNons2.fix.var.m <- cbind(Redox.WithNons2.fix.var.acs.m, Redox.WithNons2.fix.var.b73.m[,3])
 
-colnames(Redox.WithNons2.fixed.m) <- c("Accession", "variable", "acs", "B73")
-colnames(Redox.WithNons2.variable.m) <- c("Accession", "variable", "acs", "B73")
+colnames(Redox.WithNons2.fixed.m) <- c("Accession", "ratio", "acs", "B73")
+colnames(Redox.WithNons2.variable.m) <- c("Accession", "ratio", "acs", "B73")
+colnames(Redox.WithNons2.fix.var.m) <- c("Accession", "ratio", "acs", "B73")
+```
+
+```{r}
+Redox.WithNons2.fixed.m.GM <- Redox.WithNons2.fixed.m[(grep("GM",Redox.WithNons2.fixed.m$ratio)),]
+Redox.WithNons2.fixed.m.GM.m <- melt(Redox.WithNons2.fixed.m.GM)
 ```
 ```{r}
-ggplot(data=Redox.WithNons2.variable.m, mapping = aes(x=B73, y = acs, color=variable))+
-  geom_point()+
-  xlim(0,7.5)+
-  ylim(0,7.5)
+Redox.WithNons2.variable.m.GM <- Redox.WithNons2.variable.m[(grep("GM",Redox.WithNons2.variable.m$ratio)),]
+Redox.WithNons2.variable.m.m <- melt(Redox.WithNons2.variable.m)
+```
+```{r}
+ggplot(data=Redox.WithNons2.fixed.m.GM.m, mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)+
+  xlab("log2(oxidized/non)")
+ggsave("Redox.WithNons.OX.Non.acs.b73.density.png", width = 8, height = 2)
+```
+```{r}
+ggplot(data=Redox.WithNons2.variable.m.m, mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)
+xlab("log2(reduced/non)")
+ggsave("Redox.WithNons.Red.Non.acs.b73.density.png", width = 8, height = 2)
+```
+```{r}
+ggplot(data=Redox.WithNons2.fix.var.m[-grep("GM", Redox.WithNons2.fix.var.m$ratio),], mapping = aes(x=B73, y = acs, color=ratio))+
+  geom_point(size=.7)+
+  geom_smooth(method = "lm", se = FALSE, linetype="dashed", size=.5)+
+  theme_bw()+
+ # theme(legend.position = "none")+
+  ylab("acs2/6 oxidized/reduced")+
+  xlab("B73 oxidized/reduced")+
+  geom_abline(xintercept = 0, slope = 1, color="grey", size=.5)+
+  coord_fixed(expand = F)+
+  xlim(0,270)+
+  ylim(0,270)
+ggsave("fix.var_B73.acs.png")
+```
+```{r}
+ggplot(data=Redox.WithNons2.variable.m[-grep("GM", Redox.WithNons2.variable.m$ratio),], mapping = aes(x=B73, y = acs, color=ratio))+
+  geom_point(size=.7)+
+  geom_smooth(method = "lm", se = FALSE, linetype="dashed", size=.5)+
+  theme_bw()+
+#  theme(legend.position = "none")+
+  ylab("acs2/6 reduced/non")+
+  xlab("B73 reduced/non")+
+  geom_abline(xintercept = 0, slope = 1, color="grey", size=.5)+
+  xlim(0,11)+
+  ylim(0,11)+
+  coord_fixed()
+ggsave("Var.Non_B73.acs.png")
+```
+```{r}
+ggplot(data=Redox.WithNons2.fixed.m[-grep("GM", Redox.WithNons2.fixed.m$ratio),], mapping = aes(x=B73, y = acs, color=ratio))+
+  geom_point(size=.7)+
+  geom_smooth(method = "lm", se = FALSE, linetype="dashed", size=.5)+
+  theme_bw()+
+#  theme(legend.position = "none")+
+  ylab("acs2/6 oxidized/non")+
+  xlab("B73 oxidized/non")+
+  xlim(0,7)+
+  ylim(0,7)+
+  geom_abline(xintercept = 0, slope = 1, color="grey", size=.5)+
+  coord_fixed()
+#ggsave("Fix.Non_B73.acs.png")
 ```
 
 
