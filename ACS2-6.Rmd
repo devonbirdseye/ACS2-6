@@ -10,6 +10,7 @@ output: github_document
 knitr::opts_chunk$set(echo = TRUE)
 set.seed(586)
 ```
+
 ## libraries
 ```{r libraries, include=FALSE}
 library(biomaRt)
@@ -35,14 +36,17 @@ library(gridExtra)
 library(factoextra)
 library(EnvStats)
 ```
+
 ## Data import and prep
 ```{r Read in data, eval=FALSE, echo=FALSE}
 df <- read.csv("CSVs/B73-Mo17-BM-ACS26 TMT10 100319.csv", stringsAsFactors = F)
-PrevSL <- read.csv("CSVs/Seedling Leaf TMT10 030419.csv", stringsAsFactors = F)
+PrevSL <- read.csv("CSVs/PreviousAnalysis/Seedling Leaf TMT10 030419.csv", stringsAsFactors = F)
+#trim and reorder columns
 PrevSL_trim <- PrevSL[,c(16,17,2:10)]
-colnames(PrevSL_trim) <- c("GI", "Protein", "b731", "b732", "b733", "mo171", "mo172", "mo173", "bm1", "bm2", "bm3")
+colnames(PrevSL_trim) <- c("Accession", "Protein", "b731", "b732", "b733", "mo171", "mo172", "mo173", "bm1", "bm2", "bm3")
 ```
 
+## Define Biomart function for converting accessions
 ```{r BiomartRefSeqPepFun FUN, eval=FALSE, echo=FALSE}
 # Function to download sequence info from Biomart using Refseq protein vector input (biomaRt package)
 host="plants.ensembl.org"
@@ -56,6 +60,8 @@ biomartNoMissingMaizeGDB
 }
 ```
 
+## Accession Conversion for acs data
+### Biomart
 ```{r Create vector of RefSeq Peptide IDs, eval=FALSE, echo=FALSE}
 #remove "decoy hits"
 df_NoDecoys <- df[-grep("decoy",df$Protein),]
@@ -66,7 +72,6 @@ RefSeqPepV2 <- gsub("- [A-z]", "", RefSeqPepV)
 #Make accession vector a new column on df_NoDecoys
 df_NoDecoys$RefSeqPep <- RefSeqPepV2
 ```
-
 ```{r Convert accessions via biomart, eval=FALSE, echo=FALSE}
 #Run Biomart pull function
 AccConv <- BiomartRefSeqPepFun(df_NoDecoys$RefSeqPep)
@@ -83,11 +88,10 @@ AccConv <- AccConv[,c(1,2,8:15,3:7)]
 print(paste0("Input NCBI proteins = ",length(RefSeqPepV)))
 print(paste0("NCBI proteins with corresponding maizegdb IDs in Biomart = ",length(unique(AccConv$refseq_peptide))))
 ```
-
 ```{r Merge bm accessions back to df, eval=FALSE, echo=FALSE}
 df_NoDecoys_Biomart <- merge.data.frame(df_NoDecoys, AccConv, by.x = "RefSeqPep", by.y = "refseq_peptide", all=T)
 ```
-
+### epost/efetch
 ```{r Create GI vector, eval=FALSE, echo=FALSE}
 ###Use the epost/efetch functions written by Laura to pull maizegdb accessions from xml as well
 options(stringsAsFactors = FALSE)
@@ -97,11 +101,9 @@ require(readr)
 require(XML)
 
 #get GI accessions
-giAccessions<-PrevSL_trim$GI
+giAccessions<-df_NoDecoys$Accession
 #remove gi accessions with alphas AKA nonconvertible
 giAccessions<-giAccessions[-grep(giAccessions, pattern = "[a-zA-Z]")]
-#trim to remove last two empty lines
-giAccessions <- giAccessions[1:9196]
 ```
 
 ```{r epost, efetch, eval=FALSE, echo=FALSE}
@@ -112,7 +114,6 @@ p <- epost(giAccessions, db = "protein")
 #efetch genpept file format for each UID, save to text file (requirement for epost>500)
 efetch(p, db="protein",retmode = "text", rettype="gp", outfile = "efetch.txt")
 ```
-
 ```{r UID vec, eval=FALSE, echo=FALSE}
 ##Pause a couple seconds while the efetch.txt file synchs to cloud, then continue:
 
@@ -127,10 +128,14 @@ UIDVec2<-gsub(UIDVec2, pattern=".*:", replacement = "")
 #check that there is a UID for each GI
 length(UIDVec2)==length(giAccessions)
 ```
+```{r}
+length(UIDVec2)
+length(unique(UIDVec2))
+```
 
 ```{r UID to Zm, eval=FALSE, echo=FALSE}
 #since >500, need to use epost
-#loop across total number of batches of 500
+#loop across total number of batches of 200
 #post to epost, fetch each XML, create conversion table
 #get number of batches
 batches<-seq(1:ceiling(length(UIDVec2)/200))
@@ -184,6 +189,8 @@ print(paste0("Input numeric GIs with a corresponding numeric UID = ",length((NCB
 print(paste0("Unique MaizeGDB IDs returned = ",length(unique(NCBIConvert2$maizegdb.epost))))
 ```
 
+
+
 ```{r Merge Acc Conversion back with Data, eval=FALSE, echo=FALSE}
 df_NoDecoys_Biomart_epost <- merge.data.frame(df_NoDecoys_Biomart, NCBIConvert2, by.x = "Accession", by.y = "GI", all=T)
 
@@ -194,72 +201,191 @@ df_NoDecoys_Biomart_epost$V4 <- df_NoDecoys_Biomart_epost$maizegdb.epost
 df_NoDecoys_Biomart_epost$V4[is.na(df_NoDecoys_Biomart_epost$V4)]<- df_NoDecoys_Biomart_epost$maizegdb.bm.1[is.na(df_NoDecoys_Biomart_epost$V4)]
 #if no epost or biomart ID, choose the GI
 df_NoDecoys_Biomart_epost$V4[is.na(df_NoDecoys_Biomart_epost$V4)]<- df_NoDecoys_Biomart_epost$Accession[is.na(df_NoDecoys_Biomart_epost$V4)]
+
+print(paste0("Number of Missing V4 accessions left as GI in V4 column = ",
+nrow(df_NoDecoys_Biomart_epost[-(grep("Zm0", df_NoDecoys_Biomart_epost$V4)),])))
 ```
 
+
+## Accession Conversion for Previous Seedling Leaf data
+### Biomart
+```{r Create vector of RefSeq Peptide IDs, eval=FALSE, echo=FALSE}
+#remove "decoy hits"
+PrevSL_trim_NoDecoys <- PrevSL_trim[-grep("decoy",PrevSL_trim$Protein),]
+#substring to just accession
+RefSeqPepV <- substr(PrevSL_trim_NoDecoys$Protein, start = 5, stop = 18)
+#Remove any letters
+RefSeqPepV2 <- gsub("- [A-z]", "", RefSeqPepV)
+#Make accession vector a new column on PrevSL_trim_NoDecoys
+PrevSL_trim_NoDecoys$RefSeqPep <- RefSeqPepV2
+```
+```{r Convert accessions via biomart, eval=FALSE, echo=FALSE}
+#Run Biomart pull function
+AccConv <- BiomartRefSeqPepFun(PrevSL_trim_NoDecoys$RefSeqPep)
+
+#restructure result so that multiple maizegdb accessions get their own column, and each row is a unique RefSeqPep
+AccConv <- AccConv %>%
+  group_by(refseq_peptide) %>%
+  mutate(maizegdbID = paste0('maizegdb.bm.', row_number())) %>%
+  spread(maizegdbID, maizegdb)
+#re-order rows
+AccConv <- AccConv[,c(1,2,8:15,3:7)]
+
+#Check stats for biomart accession conversion
+print(paste0("Input NCBI proteins = ",length(RefSeqPepV)))
+print(paste0("NCBI proteins with corresponding maizegdb IDs in Biomart = ",length(unique(AccConv$refseq_peptide))))
+```
+```{r Merge bm accessions back to df, eval=FALSE, echo=FALSE}
+PrevSL_trim_NoDecoys_Biomart <- merge.data.frame(PrevSL_trim_NoDecoys, AccConv, by.x = "RefSeqPep", by.y = "refseq_peptide", all=T)
+```
+### epost/efetch
+```{r Create GI vector, eval=FALSE, echo=FALSE}
+###Use the epost/efetch functions written by Laura to pull maizegdb accessions from xml as well
+options(stringsAsFactors = FALSE)
+
+require(reutils)
+require(readr)
+require(XML)
+
+#get GI accessions
+giAccessions<-PrevSL_trim_NoDecoys$Accession
+#remove gi accessions with alphas AKA nonconvertible
+giAccessions<-giAccessions[-grep(giAccessions, pattern = "[a-zA-Z]")]
+```
+```{r epost, efetch, eval=FALSE, echo=FALSE}
+#if re-running this, delete old copy of efetch_PrevSL.txt from file first
+#first, convert GI to UID
+#because more than 500, need to use epost first
+p <- epost(giAccessions, db = "protein")
+#efetch genpept file format for each UID, save to text file (requirement for epost>500)
+efetch(p, db="protein",retmode = "text", rettype="gp", outfile = "efetch_PrevSL.txt")
+```
+```{r UID vec, eval=FALSE, echo=FALSE}
+##Pause a couple seconds while the efetch_PrevSL.txt file synchs to cloud, then continue:
+
+#read in UID text
+UIDVec<-read.delim(file="efetch_PrevSL.txt", header = FALSE)
+#convert to vector
+UIDVec<-UIDVec[,1]
+#get gene IDs from full flat file
+UIDVec2<-UIDVec[grep(UIDVec, pattern="GeneID")]
+#gsub out "GeneID:" to get accession number
+UIDVec2<-gsub(UIDVec2, pattern=".*:", replacement = "")
+#check that there is a UID for each GI
+length(UIDVec2)==length(giAccessions)
+```
+```{r UID to Zm, eval=FALSE, echo=FALSE}
+#since >500, need to use epost
+#loop across total number of batches of 200
+#post to epost, fetch each XML, create conversion table
+#get number of batches
+batches<-seq(1:ceiling(length(UIDVec2)/200))
+batchEnd<-0
+#create empty df
+NCBIConvert<-NULL
+#loop across batches
+for(i in 1:length(batches)){
+  batchStart<-batchEnd+1
+  if(i<length(batches)){batchEnd<-batchEnd+200}else(batchEnd<-length(UIDVec2))
+  print(batchEnd)
+  f<-epost(UIDVec2[batchStart:batchEnd], db="gene")
+  allXML2<-content(efetch(f, db="gene", retmode="xml"), as="xml")
+  #pull out gene reference locus tag, if exists, if not, return "NA"
+  dbxrefs1<-as.list(xpathApply(allXML2,"//Gene-ref", function(x) {
+             if("Gene-ref_locus-tag" %in% names(x)){xmlValue(x[["Gene-ref_locus-tag"]])}
+             else {NA}
+              }))
+  #gsub out "ZEAMMB73_"
+  dbxrefs1<-gsub(dbxrefs1, pattern = "ZEAMMB73_", replacement = "")
+  #turn into character vector
+  dbxrefs1<-unlist(dbxrefs1)
+
+    
+  #now get UIDs back (to check for length of XML)
+  dbxrefs2<-as.list(xpathApply(allXML2,"//Entrezgene_track-info/Gene-track",function(x) {
+             if("Gene-track_geneid" %in% names(x)){xmlValue(x[["Gene-track_geneid"]])}
+             else {NA}
+              }))
+  #turn into character vector
+  dbxrefs2<-unlist(dbxrefs2)
+  
+  #check that original gi length == number of XML entries efetched
+  200==length(dbxrefs2)
+  #check that number of Zm accessions matches number of gi accessions
+  200==length(dbxrefs1)
+
+  #put together
+  tmp<-cbind(giAccessions[batchStart:batchEnd], dbxrefs2, dbxrefs1)
+  NCBIConvert<-rbind(NCBIConvert, tmp)
+}
+#rename columns
+colnames(NCBIConvert)<-c("GI", "UID", "maizegdb.epost")
+
+NCBIConvert2 <- as.data.frame(NCBIConvert)
+
+#remove missing maizegdbid columns
+NCBIConvert2 <- NCBIConvert2[!(NCBIConvert2$maizegdb.epost=="NA"),]
+#Print stats
+print(paste0("Input numeric GIs with a corresponding numeric UID = ",length((NCBIConvert2$GI))))
+print(paste0("Unique MaizeGDB IDs returned = ",length(unique(NCBIConvert2$maizegdb.epost))))
+```
 ```{r Merge Acc Conversion back with PrevSL_trim Data, eval=FALSE, echo=FALSE}
-PrevSL_trim_epost <- merge.data.frame(PrevSL_trim, NCBIConvert2, by.x = "GI", by.y = "GI", all=T)
+PrevSL_trim_NoDecoys_Biomart_epost <- merge.data.frame(PrevSL_trim_NoDecoys_Biomart, NCBIConvert2, by.x = "Accession", by.y = "GI", all=T)
 
 ##make new column for complete V4 accessions
 #choose the epost ID if available
-PrevSL_trim_epost$V4 <- PrevSL_trim_epost$maizegdb.epost
+PrevSL_trim_NoDecoys_Biomart_epost$V4 <- PrevSL_trim_NoDecoys_Biomart_epost$maizegdb.epost
+#if no epost ID, choose the 1st biomart ID
+PrevSL_trim_NoDecoys_Biomart_epost$V4[is.na(PrevSL_trim_NoDecoys_Biomart_epost$V4)]<- PrevSL_trim_NoDecoys_Biomart_epost$maizegdb.bm.1[is.na(PrevSL_trim_NoDecoys_Biomart_epost$V4)]
+#if no epost or biomart ID, choose the GI
+PrevSL_trim_NoDecoys_Biomart_epost$V4[is.na(PrevSL_trim_NoDecoys_Biomart_epost$V4)]<- PrevSL_trim_NoDecoys_Biomart_epost$Accession[is.na(PrevSL_trim_NoDecoys_Biomart_epost$V4)]
+
+print(paste0("Number of Missing V4 accessions left as GI in V4 column = ",
+nrow(PrevSL_trim_NoDecoys_Biomart_epost[-(grep("Zm0", PrevSL_trim_NoDecoys_Biomart_epost$V4)),])))
 ```
 
 ```{r Save DF RDS, eval=FALSE, echo=FALSE}
 saveRDS(df_NoDecoys_Biomart_epost, "df_NoDecoys_Biomart_epost")
-saveRDS(PrevSL_trim_epost, "PrevSL_trim_epost")
+saveRDS(PrevSL_trim_NoDecoys_Biomart_epost, "PrevSL_trim_NoDecoys_Biomart_epost")
 ```
 
 
-
-# Re-start here after cleared environment
-## Data import and editing
+## Re-start here after cleared environment - Data import and editing
 ### Read DF RDS
 ```{r Read DF RDS}
 df_NoDecoys_Biomart_epost <- readRDS("df_NoDecoys_Biomart_epost")
-PrevSL_trim_epost2 <- readRDS("PrevSL_trim_epost")
+PrevSL_trim_NoDecoys_Biomart_epost <- readRDS("PrevSL_trim_NoDecoys_Biomart_epost")
 ```
+```{r}
+PrevSL_trim_NoDecoys_Biomart_epost[(PrevSL_trim_NoDecoys_Biomart_epost$maizegdb.bm.1==PrevSL_trim_NoDecoys_Biomart_epost$maizegdb.epost),]
+```
+
 
 ### Re-order columns
 ```{r Re-order columns}
 DF <- df_NoDecoys_Biomart_epost
 DF<- DF[,c(1,2,42,44,18,3:12)]
 colnames(DF)<- c("GI", "RefSeqPep", "UID", "V4", "Protein", "b731", "b732", "b733", "mo171", "mo172", "bm1", "bm2", "acs1", "acs2", "acs3")
-```
 
-### geomean functions
-```{r geomean functions}
-BMgeomean <- function(df){
-  x <- NULL
-  for(i in 1:nrow(df)){
-    v <- as.numeric(df[i, 17:18])
-    gm <- geoMean(v, na.rm = T)
-    x[i]<-gm
-  }
-  x
-}
-
-PrevSL_BMgeomean <- function(df){
-  x <- NULL
-  for(i in 1:nrow(df)){
-    v <- as.numeric(df[i, 18:20])
-    gm <- geoMean(v, na.rm = T)
-    x[i]<-gm
-  }
-  x
-}
-
-ACSgeomean <- function(df){
-  x <- NULL
-  for(i in 1:nrow(df)){
-    v <- as.numeric(df[i, 19:21])
-    gm <- geoMean(v, na.rm = T)
-    x[i]<-gm
-  }
-  x
-}
+DF_PrevSL <- PrevSL_trim_NoDecoys_Biomart_epost
+DF_PrevSL <- DF_PrevSL[,c(1,2,27,29,3,4:12)]
+colnames(DF_PrevSL) <- c("GI", "RefSeqPep", "UID", "V4", "Protein", "b731", "b732", "b733", "mo171", "mo172", "mo173", "bm1", "bm2", "bm3")
 ```
 
 ### Set mp, bm/mp, Avgs, and SDS
+```{r}
+# Function to calculate row-geometric means of defined columns
+GeomeanSetCols <- function(df, cols){
+  x <- NULL
+  for(i in 1:nrow(df)){
+    v <- as.numeric(df[i, cols])
+    gm <- geoMean(v, na.rm = T)
+    x[i]<-gm
+  }
+  x
+}
+```
+
 ```{r Set mp, bm/mp, Avgs, and SDS}
 DF$mp1 <- rowMeans(DF[,c(6,9)])
 
@@ -269,76 +395,86 @@ DF$bm2.mp1 <- DF$bm2/DF$mp1
 DF$acs1.b731 <- DF$acs1/DF$b731
 DF$acs2.b732 <- DF$acs2/DF$b732
 DF$acs3.b733 <- DF$acs3/DF$b733
-
-DF$avg.bm.mp <- BMgeomean(DF)
-DF$avg.acs.b73 <- ACSgeomean(DF)
+```
+```{r}
+DF$avg.bm.mp <- GeomeanSetCols(DF, 17:18)
+DF$avg.acs.b73 <- GeomeanSetCols(DF, 19:21)
 
 DF$sds.bm.mp <- rowSds(as.matrix(DF[,17:18]), na.rm = T)
 DF$sds.acs.b73 <- rowSds(as.matrix(DF[,19:21]), na.rm = T)
 ```
 
 ### Analyze PrevSL data
+```{r}
+colnames(DF_PrevSL)
+```
 ```{r analyze PrevSL data}
 #Set NAs to 0
-PrevSL_trim_epost2$b731[PrevSL_trim_epost2$b731==0]<-NA
-PrevSL_trim_epost2$b732[PrevSL_trim_epost2$b732==0]<-NA
-PrevSL_trim_epost2$b733[PrevSL_trim_epost2$b733==0]<-NA
-PrevSL_trim_epost2$mo171[PrevSL_trim_epost2$mo171==0]<-NA
-PrevSL_trim_epost2$mo172[PrevSL_trim_epost2$mo172==0]<-NA
-PrevSL_trim_epost2$mo173[PrevSL_trim_epost2$mo173==0]<-NA
-PrevSL_trim_epost2$bm1[PrevSL_trim_epost2$bm1==0]<-NA
-PrevSL_trim_epost2$bm2[PrevSL_trim_epost2$bm2==0]<-NA
-PrevSL_trim_epost2$bm3[PrevSL_trim_epost2$bm3==0]<-NA
+DF_PrevSL[DF_PrevSL==0]<-NA
 # calc. mp values
-PrevSL_trim_epost2$mp1 <- rowMeans(PrevSL_trim_epost2[,c(3,6)], na.rm = T)
-PrevSL_trim_epost2$mp2 <- rowMeans(PrevSL_trim_epost2[,c(4,7)], na.rm = T)
-PrevSL_trim_epost2$mp3 <- rowMeans(PrevSL_trim_epost2[,c(5,8)], na.rm = T)
+DF_PrevSL$mp1 <- rowMeans(DF_PrevSL[,c(6,9)], na.rm = T)
+DF_PrevSL$mp2 <- rowMeans(DF_PrevSL[,c(7,10)], na.rm = T)
+DF_PrevSL$mp3 <- rowMeans(DF_PrevSL[,c(8,11)], na.rm = T)
 #calc. ratios
-PrevSL_trim_epost2$bm1.mp1 <- PrevSL_trim_epost2$bm1/PrevSL_trim_epost2$mp1
-PrevSL_trim_epost2$bm2.mp2 <- PrevSL_trim_epost2$bm2/PrevSL_trim_epost2$mp2
-PrevSL_trim_epost2$bm3.mp3 <- PrevSL_trim_epost2$bm3/PrevSL_trim_epost2$mp3
+DF_PrevSL$bm1.mp1 <- DF_PrevSL$bm1/DF_PrevSL$mp1
+DF_PrevSL$bm2.mp2 <- DF_PrevSL$bm2/DF_PrevSL$mp2
+DF_PrevSL$bm3.mp3 <- DF_PrevSL$bm3/DF_PrevSL$mp3
+```
+```{r}
 #calc average and standard dev
-PrevSL_trim_epost2$avg.bm.mp <- PrevSL_BMgeomean(PrevSL_trim_epost2)
-PrevSL_trim_epost2$sds.bm.mp <- rowSds(as.matrix(PrevSL_trim_epost2[,18:20]), na.rm = T)
+DF_PrevSL$avg.bm.mp <- GeomeanSetCols(DF_PrevSL, 18:20)
+DF_PrevSL$sds.bm.mp <- rowSds(as.matrix(DF_PrevSL[,18:20]), na.rm = T)
 ```
 
-```{r write table PrevSL l2fc for Corn Cyc analyses, eval=FALSE, echo=FALSE}
-write.table(na.omit(PrevSL_trim_epost2[,c(14,23)]), "Prot_SL.txt", sep="\t", row.names = F, col.names = F)
+### write l2fc tables for input in CornCyc
+```{r write table of l2fc for CornCyc analyses, eval=FALSE, echo=FALSE}
+write.table(na.omit(DF_PrevSL[,c(4,21)]), "Prot_SL.txt", sep="\t", row.names = F, col.names = F)
+write.table(na.omit(DF[,c(4,32)]), "Prot_ACS.txt", sep="\t", row.names = F, col.names = F)
 ```
 ### Subset to sig, above, and below
 ```{r Subset to sig, above, and below}
+#Subset to SD<0.1
 DF.acs.sig <- DF[(DF$sds.acs.b73<0.1),]
 DF.bm.sig <- DF[(DF$sds.bm.mp<0.1),]
-
+DF_PrevSL.bm.sig <- DF_PrevSL[(DF_PrevSL$sds.bm.mp<0.1),]
+#subset to >10% and <10%
 DF.acs.sig.10above <- DF.acs.sig[(DF.acs.sig$avg.acs.b73>1.1),]
 DF.bm.sig.10above <- DF.bm.sig[(DF.bm.sig$avg.bm.mp>1.1),]
+DF_PrevSL.bm.sig.10above <- DF_PrevSL.bm.sig[(DF_PrevSL.bm.sig$avg.bm.mp>1.1),]
 
 DF.acs.sig.10below <- DF.acs.sig[(DF.acs.sig$avg.acs.b73<0.9),]
 DF.bm.sig.10below <- DF.bm.sig[(DF.bm.sig$avg.bm.mp<0.9),]
+DF_PrevSL.bm.sig.10below <- DF_PrevSL.bm.sig[(DF_PrevSL.bm.sig$avg.bm.mp<0.9),]
 
-PrevSL_trim_epost2.bm.sig <- PrevSL_trim_epost2[(PrevSL_trim_epost2$sds.bm.mp<0.1),]
-PrevSL_trim_epost2.bm.sig.10above <- PrevSL_trim_epost2.bm.sig[(PrevSL_trim_epost2.bm.sig$avg.bm.mp>1.1),]
-PrevSL_trim_epost2.bm.sig.10below <- PrevSL_trim_epost2.bm.sig[(PrevSL_trim_epost2.bm.sig$avg.bm.mp<0.9),]
+#Remove the one row of NA - dont know where this came from (It doesnt exist in DF or DF_SL)
+DF.acs.sig.10above <- DF.acs.sig.10above[!(is.na(DF.acs.sig.10above$GI)),]
+DF.bm.sig.10above <- DF.bm.sig.10above[!(is.na(DF.bm.sig.10above$GI)),]
+DF_PrevSL.bm.sig.10above <- DF_PrevSL.bm.sig.10above[!(is.na(DF_PrevSL.bm.sig.10above$GI)),]
+DF.acs.sig.10below <- DF.acs.sig.10below[!(is.na(DF.acs.sig.10below$GI)),]
+DF.bm.sig.10below <- DF.bm.sig.10below[!(is.na(DF.bm.sig.10below$GI)),]
+DF_PrevSL.bm.sig.10below <- DF_PrevSL.bm.sig.10below[!(is.na(DF_PrevSL.bm.sig.10below$GI)),]
 ```
 
 ### calculate Log2(fold change)
 ```{r calculate Log2(fold change)}
-DF$avg.bm.mp.l2fc <- log2(DF$avg.bm.mp)
-DF$avg.acs.b73.l2fc <- log2(DF$avg.acs.b73)
-
 DF$bm1.mp1.l2fc <- log2(DF$bm1.mp1)
 DF$bm2.mp1.l2fc <- log2(DF$bm2.mp1)
+DF$avg.bm.mp.l2fc <- log2(DF$avg.bm.mp)
 
 DF$acs1.b731.l2fc <- log2(DF$acs1.b731)
 DF$acs2.b732.l2fc <- log2(DF$acs2.b732)
 DF$acs3.b733.l2fc <- log2(DF$acs3.b733)
-
-PrevSL_trim_epost2$avg.bm.mp.l2fc <- log2(PrevSL_trim_epost2$avg.bm.mp)
-PrevSL_trim_epost2$bm1.mp1.l2fc <- log2(PrevSL_trim_epost2$bm1.mp1)
-PrevSL_trim_epost2$bm2.mp2.l2fc <- log2(PrevSL_trim_epost2$bm2.mp2)
-PrevSL_trim_epost2$bm3.mp3.l2fc <- log2(PrevSL_trim_epost2$bm3.mp3)
+DF$avg.acs.b73.l2fc <- log2(DF$avg.acs.b73)
+```
+```{r}
+DF_PrevSL$bm1.mp1.l2fc <- log2(DF_PrevSL$bm1.mp1)
+DF_PrevSL$bm2.mp2.l2fc <- log2(DF_PrevSL$bm2.mp2)
+DF_PrevSL$bm3.mp3.l2fc <- log2(DF_PrevSL$bm3.mp3)
+DF_PrevSL$avg.bm.mp.l2fc <- log2(DF_PrevSL$avg.bm.mp)
 ```
 
+
+## KEGG data prep
 ### Subset without duplicate UIDs for KEGG
 ```{r Subset without duplicate UIDs for KEGG}
 DF_NoDupUID <- DF[!(duplicated(DF$UID) | is.na(DF$UID)),]
@@ -346,49 +482,40 @@ DF_NoDupUID <- DF[!(duplicated(DF$UID) | is.na(DF$UID)),]
 nrow(DF)
 nrow(DF_NoDupUID)
 ```
-
-```{r Save l2fc data for CornCyc analysis, eval=FALSE, echo=FALSE}
-DF_NoDupUID.txt <- DF_NoDupUID[,c(4,27)]
-write.table(DF_NoDupUID.txt, "Prot_acs.txt", sep="\t", row.names = F, col.names = F)
-```
-
 ### Subset PrevSL without duplicate UIDs for KEGG
 ```{r Subset PrevSL without duplicate UIDs for KEGG}
-PrevSL_trim_epost2_NoDupUID <- PrevSL_trim_epost2[!(duplicated(PrevSL_trim_epost2$UID) | is.na(PrevSL_trim_epost2$UID)),]
+DF_PrevSL_NoDupUID <- DF_PrevSL[!(duplicated(DF_PrevSL$UID) | is.na(DF_PrevSL$UID)),]
 
-nrow(PrevSL_trim_epost2)
-nrow(PrevSL_trim_epost2_NoDupUID)
+nrow(DF_PrevSL)
+nrow(DF_PrevSL_NoDupUID)
+```
+### subset to hyb and acs l2fc DFs for KEGG
+```{r}
+colnames(DF_NoDupUID)
 ```
 
-### subset to hyb and acs l2fc DFs for KEGG
 ```{r subset to hyb and acs l2fc DFs for KEGG}
-DF.bm.l2fc <- DF_NoDupUID[,28:29]
-DF.acs.l2fc <- DF_NoDupUID[,30:32]
-DF.bm.AND.acs.l2fc <- DF_NoDupUID[,28:32]
+DF.bm.l2fc <- DF_NoDupUID[,26:27]
+DF.acs.l2fc <- DF_NoDupUID[,29:31]
+DF.bm.AND.acs.l2fc <- DF_NoDupUID[,c(26:27,29:31)]
 
 rownames(DF.bm.l2fc) <- DF_NoDupUID$UID
 rownames(DF.acs.l2fc) <- DF_NoDupUID$UID
 rownames(DF.bm.AND.acs.l2fc) <- DF_NoDupUID$UID
-
-#Remove the one row of NA - dont know where this came from (?)
-DF.acs.sig.10below <- DF.acs.sig.10below[!(is.na(DF.acs.sig.10below$GI)),]
-DF.acs.sig.10above <- DF.acs.sig.10above[!(is.na(DF.acs.sig.10above$GI)),]
 ```
 
 ### subset PrevSL to hyb and acs l2fc DFs for KEGG
 ```{r subset PrevSL to hyb and acs l2fc DFs for KEGG}
-PrevSL_trim_epost2.bm.l2fc <- PrevSL_trim_epost2_NoDupUID[,24:26]
-rownames(PrevSL_trim_epost2.bm.l2fc) <- PrevSL_trim_epost2_NoDupUID$UID
-
-PrevSL_trim_epost2.bm.l2fc<- (na.omit(PrevSL_trim_epost2.bm.l2fc))
+DF_PrevSL.bm.l2fc <- DF_PrevSL_NoDupUID[,24:26]
+rownames(DF_PrevSL.bm.l2fc) <- DF_PrevSL_NoDupUID$UID
 ```
-
 
 ```{r Venn Diagrams, eval=FALSE, echo=FALSE}
 VennDiagram::venn.diagram(list("BxM"=DF.bm.sig.10above$GI, "acs2/6"=DF.acs.sig.10above$GI), main = "Proteins 10% above expected (sd<0.1)", main.cex = 2, cex=2, cat.cex=1.5, filename = "DF10aboveVenn.png", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(0,0), main.pos = c(0.5,0.95))
 
 VennDiagram::venn.diagram(list("BxM"=DF.bm.sig.10below$GI, "acs2/6"=DF.acs.sig.10below$GI), main = "Proteins 10% below expected (sd<0.1)",main.cex = 2, cex=2, cat.cex=1.5, filename = "DF10belowVenn.png", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(0,0), main.pos = c(0.5,0.95))
 ```
+
 ### Subset DFs to discrete sections of Venn Diagrams
 ```{r Subset DFs to discrete sections of Venn Diagrams}
 DF.bm.AND.acs.sig.10above <- DF.bm.sig.10above[(DF.bm.sig.10above$GI%in%DF.acs.sig.10above$GI),]
@@ -405,20 +532,16 @@ DF.acs.NOT.bm.sig.10below <- DF.acs.sig.10below[!(DF.acs.sig.10below$GI%in%DF.bm
 (nrow(DF.bm.AND.acs.sig.10below)+nrow(DF.bm.NOT.acs.sig.10below)+nrow(DF.acs.NOT.bm.sig.10below))==(length(unique(c(DF.bm.sig.10below$GI,DF.acs.sig.10below$GI))))
 ```
 
-
 # KEGG
 ## Pathview and GAGE to create KEGG maps
 ### Define gsets and run gage on acs and hyb
 ```{r Define gsets and run gage on acs and hyb}
 zma <- kegg.gsets(species = "zma", id.type = "entrez")
 
-keggres_HYB_DF <- gage(DF.bm.l2fc, gsets = zma$kg.sets, samp = c(1:2), same.dir = T)
-keggres_ACS_DF <- gage(DF.acs.l2fc, gsets = zma$kg.sets, samp = c(1:3), same.dir = T)
-keggres_HYB.AND.ACS_DF <- gage(DF.bm.AND.acs.l2fc, gsets = zma$kg.sets, samp = c(1:5), same.dir = T)
-keggres_PrevSL_DF <- gage(PrevSL_trim_epost2.bm.l2fc, gsets = zma$kg.sets, samp = c(1:3), same.dir = F)
-```
-```{r}
-write.csv(keggres_PrevSL_DF$greater, "keggres_PrevSL_DF.csv")
+keggres_HYB_DF <- gage(DF.bm.l2fc, gsets = zma$kg.sets, samp = c(1:2))
+keggres_ACS_DF <- gage(DF.acs.l2fc, gsets = zma$kg.sets, samp = c(1:3))
+keggres_HYB.AND.ACS_DF <- gage(DF.bm.AND.acs.l2fc, gsets = zma$kg.sets, samp = c(1:5))
+keggres_PrevSL_DF <- gage(DF_PrevSL.bm.l2fc, gsets = zma$kg.sets, samp = c(1:3))
 ```
 
 ### PVfun
@@ -440,11 +563,9 @@ for(i in 1:nrow(Vm)){
 }
 ```
 
-
-
 ```{r PVfun run, eval=FALSE, echo=FALSE}
-PVfun(keggres_PrevSL_DF$greater, PrevSL_trim_epost2.bm.l2fc)
-PVfun(keggres_PrevSL_DF$less, PrevSL_trim_epost2.bm.l2fc)
+PVfun(keggres_PrevSL_DF$greater, DF_PrevSL.bm.l2fc)
+PVfun(keggres_PrevSL_DF$less, DF_PrevSL.bm.l2fc)
 
 PVfun(keggres_HYB_DF$greater, DF.bm.l2fc)
 PVfun(keggres_HYB_DF$less, DF.bm.l2fc)
@@ -452,9 +573,7 @@ PVfun(keggres_HYB_DF$less, DF.bm.l2fc)
 PVfun(keggres_ACS_DF$greater, DF.acs.l2fc)
 PVfun(keggres_ACS_DF$less, DF.acs.l2fc)
 
-pathview(PrevSL_trim_epost2.bm.l2fc, pathway.id = "zma00010", species = "zma", out.suffix = "keggres_PrevSL_DF$less_Glycolysis")
-```
-```{r}
+PVfun(keggres_HYB.AND.ACS_DF$greater, DF.bm.AND.acs.l2fc)
 PVfun(keggres_HYB.AND.ACS_DF$less, DF.bm.AND.acs.l2fc)
 ```
 
@@ -515,7 +634,7 @@ ExportKeggDFpng.HYB.AND.ACS(keggres_HYB.AND.ACS_DF$greater)
 
 
 ```{r KEGG:AminoAcidBio, eval=FALSE, echo=FALSE}
-BiosynthesisAAs <- pathview(gene.data = DF.bm.l2fc, pathway.id = "zma01230", species="zma", out.suffix = "BiosynthesisAAs_HYB", keys.align = "y", kegg.native = F, match.data = F, multi.state = T, same.layer = T, cex=0.125, afactor=3, map.null = T, expand.node = T)
+BiosynthesisAAs <- pathview(gene.data = DF.acs.l2fc, pathway.id = "zma01230", species="zma", out.suffix = "BiosynthesisAAs_ACS", keys.align = "y", kegg.native = F, match.data = F, multi.state = T, same.layer = T, cex=0.125, afactor=3, map.null = T, expand.node = T)
 ```
 
 
@@ -538,7 +657,11 @@ gamer$Term <- Term(as.character(gamer$term_accession))
 
 #Make gamer dataframe trimmed to only proteins detected in this run to use as background control set for enrichment analyses (input for "GamerCut" in GOanalysisGodata function)
 GamerCut <- gamer[(gamer$db_object_id %in% DF$V4),]
-GamerCut_PrevSL <- gamer[(gamer$db_object_id %in% PrevSL_trim_epost2$V4),]
+GamerCut_PrevSL <- gamer[(gamer$db_object_id %in% DF_PrevSL$V4),]
+```
+
+```{r}
+GamerCut
 ```
 
 ### define GO:photosynthesis genes and GO:ribosome genes
@@ -608,6 +731,7 @@ GOanalysisMap <- function(GOdata, nodes=10){
 }
 ```
 
+
 ```{r GO analyses, eval=FALSE, echo=FALSE}
 #above
 DF.acs.sig.10above.godataBP <- GOanalysisGodata(DF.acs.sig.10above, GamerCut, "BP")
@@ -638,9 +762,6 @@ GO.DF.l <- GOanalysisDF.list(GOdata.list)
 #Save list of GO term enrichment tables
 saveRDS(GO.DF.l, "GO.DF.l")
 ```
-
-
-
 
 ### Read back in analyzed data
 ```{r readRDS}
@@ -727,6 +848,180 @@ SelectSigGOgenes <- function(GOdata, GOterm){
 ```{rrSelectSigGOgenes run}
 SelectSigGOgenes(GOdata.list$DF.acs.sig.10below.godataBP, "GO:0010025")
 ```
+
+```{r}
+DF.ribosomal <- DF[(grep("ribosomal", DF$Protein)),]
+DF.ribosomal <- DF.ribosomal[-(grep("NP_04", DF.ribosomal$Protein)),]
+DF_PrevSL.ribosomal <- DF_PrevSL[(grep("ribosomal", DF_PrevSL$Protein)),]
+DF_PrevSL.ribosomal <- DF_PrevSL.ribosomal[-(grep("NP_04", DF_PrevSL.ribosomal$Protein)),]
+
+DF.GO.photo <- DF[(DF$V4%in%go.photosynthesis$db_object_id),]
+DF_PrevSL.GO.photo <- DF_PrevSL[(DF_PrevSL$V4%in%go.photosynthesis$db_object_id),]
+
+DF.PE <- DF[(grep("NP_04", DF$Protein)),]
+DF_PrevSL.PE <- DF_PrevSL[(grep("NP_04", DF_PrevSL$Protein)),]
+
+DF.PE.ribo <- DF.PE[(grep("ribosomal", DF.PE$Protein)),]
+DF_PrevSL.PE.ribo <- DF_PrevSL.PE[(grep("ribosomal", DF_PrevSL.PE$Protein)),]
+
+DF.PE <- DF.PE[-(grep("ribosomal", DF.PE$Protein)),]
+DF_PrevSL.PE <- DF_PrevSL.PE[-(grep("ribosomal", DF_PrevSL.PE$Protein)),]
+```
+```{r}
+DF.all.cut <- DF[,c(5,23)]
+DF_PrevSL.all.cut <- DF_PrevSL[,c(5,21)]
+DF.all.cut.DF_PrevSL.all.cut <- merge.data.frame(DF.all.cut, DF_PrevSL.all.cut, by="Protein", all=F)
+DF.all.cut.DF_PrevSL.all.cut$ID <- "all"
+```
+```{r}
+DF.ribosomal.cut <- DF.ribosomal[,c(5,23)]
+DF_PrevSL.ribosomal.cut <- DF_PrevSL.ribosomal[,c(5,21)]
+DF.ribosomal.cut.DF_PrevSL.ribosomal.cut <- merge.data.frame(DF.ribosomal.cut, DF_PrevSL.ribosomal.cut, by="Protein", all=F)
+DF.ribosomal.cut.DF_PrevSL.ribosomal.cut$ID <- "ribosomal"
+
+DF.ribosomal.cut.acs.bm <- DF.ribosomal[,c(5,22,23)]
+DF.ribosomal.cut.acs.bm$ID <- "ribosomal"
+```
+```{r}
+DF.GO.photo.cut <- DF.GO.photo[,c(5,23)]
+DF_PrevSL.GO.photo.cut <- DF_PrevSL.GO.photo[,c(5,21)]
+DF.GO.photo.cut.DF_PrevSL.GO.photo.cut <- merge.data.frame(DF.GO.photo.cut, DF_PrevSL.GO.photo.cut, by="Protein", all=F)
+DF.GO.photo.cut.DF_PrevSL.GO.photo.cut$ID <- "GO.photo"
+
+DF.GO.photo.cut.acs.bm <- DF.GO.photo[,c(5,22,23)]
+DF.GO.photo.cut.acs.bm$ID <- "GO.photo"
+```
+```{r}
+write.csv(DF_PrevSL.PE, "DF_PrevSL.PE.csv")
+```
+
+```{r}
+DF.PE.cut <- DF.PE[,c(5,23)]
+DF_PrevSL.PE.cut <- DF_PrevSL.PE[,c(5,21)]
+DF.PE.cut.DF_PrevSL.PE.cut <- merge.data.frame(DF.PE.cut, DF_PrevSL.PE.cut, by="Protein", all=F)
+DF.PE.cut.DF_PrevSL.PE.cut$ID <- "PE"
+
+DF.PE.cut.acs.bm <- DF.PE[,c(5,22,23)]
+DF.PE.cut.acs.bm$ID <- "PE"
+```
+```{r}
+DF.PE.ribo.cut <- DF.PE.ribo[,c(5,23)]
+DF.PE.ribo.cut.bm <- DF.PE.ribo[,c(5,22)]
+DF_PrevSL.PE.ribo.cut <- DF_PrevSL.PE.ribo[,c(5,21)]
+DF.PE.ribo.cut.DF_PrevSL.PE.ribo.cut <- merge.data.frame(DF.PE.ribo.cut, DF_PrevSL.PE.ribo.cut, by="Protein", all=F)
+DF.PE.ribo.cut.DF_PrevSL.PE.ribo.cut$ID <- "PE.ribo"
+
+DF.PE.ribo.cut.acs.bm <- DF.PE.ribo[,c(5,22,23)]
+DF.PE.ribo.cut.acs.bm$ID <- "PE.ribo"
+```
+```{r}
+DF.cut.DF_PrevSL.cut.rbind <- rbind(DF.all.cut.DF_PrevSL.all.cut, DF.ribosomal.cut.DF_PrevSL.ribosomal.cut, DF.GO.photo.cut.DF_PrevSL.GO.photo.cut, DF.PE.cut.DF_PrevSL.PE.cut, DF.PE.ribo.cut.DF_PrevSL.PE.ribo.cut)
+```
+```{r}
+DF.cut.DF_PrevSL.cut.rbind.NE <- rbind(DF.all.cut.DF_PrevSL.all.cut, DF.ribosomal.cut.DF_PrevSL.ribosomal.cut, DF.GO.photo.cut.DF_PrevSL.GO.photo.cut)
+DF.cut.DF_PrevSL.cut.rbind.PE <- rbind(DF.all.cut.DF_PrevSL.all.cut, DF.PE.cut.DF_PrevSL.PE.cut, DF.PE.ribo.cut.DF_PrevSL.PE.ribo.cut)
+```
+```{r}
+DF.cut.acs.bm.PE.rbind <- rbind(DF.PE.cut.acs.bm,DF.PE.ribo.cut.acs.bm)
+DF.cut.acs.bm.NE.rbind <- rbind(DF.GO.photo.cut.acs.bm, DF.ribosomal.cut.acs.bm)
+```
+```{r}
+write.csv(DF.cut.DF_PrevSL.cut.rbind, "DF.cut.DF_PrevSL.cut.rbind.csv")
+```
+```{r}
+DF.cut.DF_PrevSL.cut.rbind.NE.lims <- DF.cut.DF_PrevSL.cut.rbind.NE
+DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73 <- log2(DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73)
+DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp <- log2(DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp)
+DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73[DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73>1.0]<- 1.0
+DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73[DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73< -1.0]<- -1.0
+DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp[DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp>1.0]<- 1.0
+DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp[DF.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp< -1.0]<- -1.0
+```
+```{r}
+DF.cut.DF_PrevSL.cut.rbind.PE.lims <- DF.cut.DF_PrevSL.cut.rbind.PE
+DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73 <- log2(DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73)
+DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp <- log2(DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp)
+DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73[DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73>1.0]<- 1.0
+DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73[DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73< -1.0]<- -1.0
+DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp[DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp>1.0]<- 1.0
+DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp[DF.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp< -1.0]<- -1.0
+```
+```{r}
+DF.cut.acs.bm.PE.rbind.lims <- DF.cut.acs.bm.PE.rbind
+DF.cut.acs.bm.PE.rbind.lims$avg.acs.b73 <- log2(DF.cut.acs.bm.PE.rbind.lims$avg.acs.b73)
+DF.cut.acs.bm.PE.rbind.lims$avg.bm.mp <- log2(DF.cut.acs.bm.PE.rbind.lims$avg.bm.mp)
+DF.cut.acs.bm.PE.rbind.lims$avg.acs.b73[DF.cut.acs.bm.PE.rbind.lims$avg.acs.b73>1.0]<- 1.0
+DF.cut.acs.bm.PE.rbind.lims$avg.acs.b73[DF.cut.acs.bm.PE.rbind.lims$avg.acs.b73< -1.0]<- -1.0
+DF.cut.acs.bm.PE.rbind.lims$avg.bm.mp[DF.cut.acs.bm.PE.rbind.lims$avg.bm.mp>1.0]<- 1.0
+DF.cut.acs.bm.PE.rbind.lims$avg.bm.mp[DF.cut.acs.bm.PE.rbind.lims$avg.bm.mp< -1.0]<- -1.0
+```
+```{r}
+write.csv(DF.cut.acs.bm.PE.rbind,"DF.cut.acs.bm.PE.rbind.csv")
+```
+
+```{r}
+DF.cut.acs.bm.NE.rbind.lims <- DF.cut.acs.bm.NE.rbind
+DF.cut.acs.bm.NE.rbind.lims$avg.acs.b73 <- log2(DF.cut.acs.bm.NE.rbind.lims$avg.acs.b73)
+DF.cut.acs.bm.NE.rbind.lims$avg.bm.mp <- log2(DF.cut.acs.bm.NE.rbind.lims$avg.bm.mp)
+DF.cut.acs.bm.NE.rbind.lims$avg.acs.b73[DF.cut.acs.bm.NE.rbind.lims$avg.acs.b73>1.0]<- 1.0
+DF.cut.acs.bm.NE.rbind.lims$avg.acs.b73[DF.cut.acs.bm.NE.rbind.lims$avg.acs.b73< -1.0]<- -1.0
+DF.cut.acs.bm.NE.rbind.lims$avg.bm.mp[DF.cut.acs.bm.NE.rbind.lims$avg.bm.mp>1.0]<- 1.0
+DF.cut.acs.bm.NE.rbind.lims$avg.bm.mp[DF.cut.acs.bm.NE.rbind.lims$avg.bm.mp< -1.0]<- -1.0
+```
+```{r}
+ggplot(DF.cut.DF_PrevSL.cut.rbind.PE.lims, mapping = aes(x=(avg.acs.b73), y=(avg.bm.mp), color=ID))+
+  geom_point(size=.5)+
+  theme_bw()+
+  scale_color_manual(values=c("grey80","blue", "red"))+
+  ylab("log2(BxM/MP)")+
+  xlab("log2(acs/B73)")+
+ # geom_abline(slope = 1, color="grey", size=.5)+
+  geom_vline(color="grey", size=.5, xintercept = 0)+
+  geom_hline(color="grey", size=.5, yintercept = 0)+
+  coord_fixed(expand = F)+
+  xlim(-1,1)+
+  ylim(-1,1)+
+  ggtitle("Shared plastid-encoded proteins")
+ggsave("Scatter_SharedPE.png")
+```
+
+
+```{r}
+ggplot(DF.cut.DF_PrevSL.cut.rbind.NE.lims, mapping = aes(x=(avg.acs.b73), y=(avg.bm.mp), color=ID))+
+  geom_point(size=.5)+
+  theme_bw()+
+  scale_color_manual(values=c("grey80","blue", "red"))+
+  ylab("log2(BxM/MP)")+
+  xlab("log2(acs/B73)")+
+ # geom_abline(slope = 1, color="grey", size=.5)+
+  geom_vline(color="grey", size=.5, xintercept = 0)+
+  geom_hline(color="grey", size=.5, yintercept = 0)+
+  coord_fixed(expand = F)+
+  xlim(-1,1)+
+  ylim(-1,1)+
+  ggtitle("Shared nuclear-encoded proteins")
+ggsave("Scatter_SharedNE.png")
+```
+```{r}
+ggplot(DF.cut.acs.bm.PE.rbind, mapping = aes(x=(avg.acs.b73), y=(avg.bm.mp), color=ID))+
+  geom_point(size=.5)+
+  theme_bw()+
+  scale_color_manual(values=c("grey80","blue", "red"))+
+  ylab("log2(BxM/MP)")+
+  xlab("log2(acs/B73)")+
+ # geom_abline(slope = 1, color="grey", size=.5)+
+  geom_vline(color="grey", size=.5, xintercept = 0)+
+  geom_hline(color="grey", size=.5, yintercept = 0)+
+  coord_fixed(expand = F)+
+ xlim(0.6,1.4)+
+ ylim(0.6,1.4)+
+  ggtitle("Shared plastid-encoded proteins")
+#ggsave("Scatter_SharedPE.png")
+```
+```{r}
+write.csv(DF.cut.acs.bm.PE.rbind, "DF.cut.acs.bm.PE.rbind.csv")
+```
+
 
 
 # Distance matrices to analyze bio replicates
@@ -923,18 +1218,7 @@ colnames(Redox) <- c("nonCys.b73.1", "nonCys.b73.2", "nonCys.b73.3", "nonCys.mo1
 ```
 
 ## Analyze redox data
-```{r}
-# Function to calculate row-geometric means of defined columns
-GeomeanSetCols <- function(df, cols){
-  x <- NULL
-  for(i in 1:nrow(df)){
-    v <- as.numeric(df[i, cols])
-    gm <- geoMean(v, na.rm = T)
-    x[i]<-gm
-  }
-  x
-}
-```
+
 
 ```{r}
 Redox$nonCys.acs.1.nonCys.b73.1 <- Redox$nonCys.acs.1/Redox$nonCys.b73.1
@@ -1580,7 +1864,7 @@ FC.acs.b73<-function(x){
   B73Mean<-mean(x[1:3])
   #get mean of acs
   acsMean<-mean(x[8:10])
-  ret<-log(B73Mean/acsMean, base=2)
+  ret<-log(acsMean/B73Mean, base=2)
   #return fold vector, with GI# as names
   return(ret)
 }
@@ -1601,7 +1885,13 @@ colnames(PE.FC.acs.b73.CV) <- c("fold", "CV")
 PE.df <- cbind(PE.FC.bm.mp.CV,PE.FC.acs.b73.CV)
 ```
 ```{r}
-PE.df <- 
+colnames(PE.df) <- c("bm.mp.fold", "bm.mp.CV", "acs.b73.fold", "acs.b73.CV")
+```
+```{r}
+PE.df$Protein <- rownames(PE.df)
+```
+```{r}
+PE.df.m <- melt(PE.df)
 ```
 
 
@@ -1610,7 +1900,7 @@ library(cowplot)
 ```
 
 ```{r}
-ggCVVolcano(PE.FC.bm.mp.CV)
+ggCVVolcano(PE.FC.acs.b73.CV)
 ```
 
 ```{r}
