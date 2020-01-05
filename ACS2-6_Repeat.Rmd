@@ -1,0 +1,2054 @@
+---
+title: "ACS2/6"
+author: "Devon Birdseye"
+date: "11/19/2019"
+output: github_document
+---
+
+# Analysis of ACS2/6 mutant proteomics & comparison to BxM hybrid
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+set.seed(586)
+```
+## libraries
+```{r libraries, include=FALSE}
+library(biomaRt)
+library(reshape2)
+library(scales)
+library(tidyverse)
+library(AnnotationFilter)
+library(ggplot2)
+library(topGO)
+library(latexpdf)
+require(reutils)
+require(readr)
+require(XML)
+library(scales)
+library(DESeq2)
+library(pathview)
+library(gage)
+library(gageData)
+library(KEGGREST)
+library(dplyr)
+library(tidyr)
+library(gridExtra)
+library(factoextra)
+library(EnvStats)
+```
+## Data import and prep
+```{r Read in data, eval=FALSE, echo=FALSE}
+df2 <- read.csv("CSVs/RepeatAnalysis/ACS2-6_Repeat.csv", stringsAsFactors = F)
+```
+
+
+```{r BiomartRefSeqPepFun FUN, eval=FALSE, echo=FALSE}
+# Function to download sequence info from Biomart using Refseq protein vector input (biomaRt package)
+host="plants.ensembl.org"
+mysets<-listDatasets(useMart("plants_mart", host = host))
+myusemart <- useDataset("zmays_eg_gene", mart = useMart("plants_mart", host = host))
+
+BiomartRefSeqPepFun <- function(GeneVector){
+  biomart <-  getBM(attributes=c("maizegdb", "refseq_peptide"), filters = ("refseq_peptide"), values = list(GeneVector), mart = myusemart)
+  biomartNoMissingMaizeGDB <- biomart[!(biomart$maizegdb==""),]
+biomartNoMissingMaizeGDB
+}
+```
+
+```{r Create vector of RefSeq Peptide IDs, eval=FALSE, echo=FALSE}
+#remove "decoy hits"
+df_Repeat_NoDecoys <- df2[-(grep("decoy",df2$Protein)),]
+#substring to just accession
+RefSeqPepV <- substr(df_Repeat_NoDecoys$Protein, start = 5, stop = 18)
+#Remove any letters
+RefSeqPepV2 <- gsub("- [A-z]", "", RefSeqPepV)
+#Make accession vector a new column on df_Repeat_NoDecoys
+df_Repeat_NoDecoys$RefSeqPep <- RefSeqPepV2
+```
+
+```{r Convert accessions via biomart, eval=FALSE, echo=FALSE}
+#Run Biomart pull function
+AccConv <- BiomartRefSeqPepFun(df_Repeat_NoDecoys$RefSeqPep)
+
+#restructure result so that multiple maizegdb accessions get their own column, and each row is a unique RefSeqPep
+AccConv <- AccConv %>%
+  group_by(refseq_peptide) %>%
+  mutate(maizegdbID = paste0('maizegdb.bm.', row_number())) %>%
+  spread(maizegdbID, maizegdb)
+#re-order rows
+AccConv <- AccConv[,c(1,2,8:15,3:7)]
+
+#Check stats for biomart accession conversion
+print(paste0("Input NCBI proteins = ",length(RefSeqPepV)))
+print(paste0("NCBI proteins with corresponding maizegdb IDs in Biomart = ",length(unique(AccConv$refseq_peptide))))
+```
+
+```{r Merge bm accessions back to df, eval=FALSE, echo=FALSE}
+df_Repeat_NoDecoys_Biomart <- merge.data.frame(df_Repeat_NoDecoys, AccConv, by.x = "RefSeqPep", by.y = "refseq_peptide", all.x = T, all.y = F)
+```
+
+
+```{r Create GI vector, eval=FALSE, echo=FALSE}
+###Use the epost/efetch functions written by Laura to pull maizegdb accessions from xml as well
+options(stringsAsFactors = FALSE)
+
+require(reutils)
+require(readr)
+require(XML)
+
+#get GI accessions
+giAccessions<-df_Repeat_NoDecoys$Accession
+#remove gi accessions with alphas AKA nonconvertible
+giAccessions<-giAccessions[-grep(giAccessions, pattern = "[a-zA-Z]")]
+```
+
+```{r epost, efetch, eval=FALSE, echo=FALSE}
+#if re-running this, delete old copy of efetch_Repeat.txt from file first
+#first, convert GI to UID
+#because more than 500, need to use epost first
+p <- epost(giAccessions, db = "protein")
+#efetch genpept file format for each UID, save to text file (requirement for epost>500)
+efetch(p, db="protein",retmode = "text", rettype="gp", outfile = "efetch_Repeat.txt")
+```
+
+```{r UID vec, eval=FALSE, echo=FALSE}
+##Pause a couple seconds while the efetch_Repeat.txt file synchs to cloud, then continue:
+
+#read in UID text
+UIDVec<-read.delim(file="efetch_Repeat.txt", header = FALSE)
+#convert to vector
+UIDVec<-UIDVec[,1]
+#get gene IDs from full flat file
+UIDVec2<-UIDVec[grep(UIDVec, pattern="GeneID")]
+#gsub out "GeneID:" to get accession number
+UIDVec2<-gsub(UIDVec2, pattern=".*:", replacement = "")
+#check that there is a UID for each GI
+length(UIDVec2)==length(giAccessions)
+```
+
+```{r UID to Zm, eval=FALSE, echo=FALSE}
+#since >500, need to use epost
+#loop across total number of batches of 200
+#post to epost, fetch each XML, create conversion table
+#get number of batches
+batches<-seq(1:ceiling(length(UIDVec2)/500))
+batchEnd<-0
+#create empty df
+NCBIConvert<-NULL
+#loop across batches
+for(i in 1:length(batches)){
+  batchStart<-batchEnd+1
+  if(i<length(batches)){batchEnd<-batchEnd+500}else(batchEnd<-length(UIDVec2))
+  print(batchEnd)
+  f<-epost(UIDVec2[batchStart:batchEnd], db="gene")
+  allXML2<-content(efetch(f, db="gene", retmode="xml"), as="xml")
+  #pull out gene reference locus tag, if exists, if not, return "NA"
+  dbxrefs1<-as.list(xpathApply(allXML2,"//Gene-ref", function(x) {
+             if("Gene-ref_locus-tag" %in% names(x)){xmlValue(x[["Gene-ref_locus-tag"]])}
+             else {NA}
+              }))
+  #gsub out "ZEAMMB73_"
+  dbxrefs1<-gsub(dbxrefs1, pattern = "ZEAMMB73_", replacement = "")
+  #turn into character vector
+  dbxrefs1<-unlist(dbxrefs1)
+
+    
+  #now get UIDs back (to check for length of XML)
+  dbxrefs2<-as.list(xpathApply(allXML2,"//Entrezgene_track-info/Gene-track",function(x) {
+             if("Gene-track_geneid" %in% names(x)){xmlValue(x[["Gene-track_geneid"]])}
+             else {NA}
+              }))
+  #turn into character vector
+  dbxrefs2<-unlist(dbxrefs2)
+  
+  #check that original gi length == number of XML entries efetched
+  500==length(dbxrefs2)
+  #check that number of Zm accessions matches number of gi accessions
+  500==length(dbxrefs1)
+
+  #put together
+  tmp<-cbind(giAccessions[batchStart:batchEnd], dbxrefs2, dbxrefs1)
+  NCBIConvert<-rbind(NCBIConvert, tmp)
+}
+#rename columns
+colnames(NCBIConvert)<-c("GI", "UID", "maizegdb.epost")
+
+NCBIConvert2 <- as.data.frame(NCBIConvert)
+
+#remove missing maizegdbid columns
+NCBIConvert2 <- NCBIConvert2[!(NCBIConvert2$maizegdb.epost=="NA"),]
+#Print stats
+print(paste0("Input numeric GIs with a corresponding numeric UID = ",length((NCBIConvert2$GI))))
+print(paste0("Unique MaizeGDB IDs returned = ",length(unique(NCBIConvert2$maizegdb.epost))))
+```
+
+```{r Merge Acc Conversion back with Data, eval=FALSE, echo=FALSE}
+df_Repeat_NoDecoys_Biomart_epost <- merge.data.frame(df_Repeat_NoDecoys_Biomart, NCBIConvert2, by.x = "Accession", by.y = "GI", all=T)
+
+##make new column for complete V4 accessions
+#choose the epost ID if available
+df_Repeat_NoDecoys_Biomart_epost$V4 <- df_Repeat_NoDecoys_Biomart_epost$maizegdb.epost
+#if no epost ID, choose the 1st biomart ID
+df_Repeat_NoDecoys_Biomart_epost$V4[is.na(df_Repeat_NoDecoys_Biomart_epost$V4)]<- df_Repeat_NoDecoys_Biomart_epost$maizegdb.bm.1[is.na(df_Repeat_NoDecoys_Biomart_epost$V4)]
+#if no epost or biomart ID, choose the GI
+df_Repeat_NoDecoys_Biomart_epost$V4[is.na(df_Repeat_NoDecoys_Biomart_epost$V4)]<- df_Repeat_NoDecoys_Biomart_epost$Accession[is.na(df_Repeat_NoDecoys_Biomart_epost$V4)]
+```
+
+```{r Save DF RDS, eval=FALSE, echo=FALSE}
+saveRDS(df_Repeat_NoDecoys_Biomart_epost, "df_Repeat_NoDecoys_Biomart_epost")
+```
+
+# Re-start here after cleared environment
+## Data import and editing
+### Read DF RDS
+```{r Read DF RDS}
+df_Repeat_NoDecoys_Biomart_epost <- readRDS("df_Repeat_NoDecoys_Biomart_epost")
+```
+
+```{r}
+#Remove one weird NA row
+df_Repeat_NoDecoys_Biomart_epost.NoNA <- df_Repeat_NoDecoys_Biomart_epost[!(is.na(df_Repeat_NoDecoys_Biomart_epost$B73.1)),]
+```
+
+```{r}
+df_Repeat_NoDecoys_Biomart_epost.NoNA
+```
+
+
+### Re-order columns
+```{r Re-order columns}
+DF2 <- df_Repeat_NoDecoys_Biomart
+DF2<- DF2[,c(17,1,13,19,18,2:11)]
+colnames(DF2)<- c("GI", "RefSeqPep", "Score", "V4", "Protein", "b731", "b732", "b733", "b734", "b735", "acs1", "acs2", "acs3", "acs4", "acs5")
+```
+
+### geomean functions
+```{r geomean functions}
+ACSgeomean2 <- function(df){
+  x <- NULL
+  for(i in 1:nrow(df)){
+    v <- as.numeric(df[i, 16:20])
+    gm <- geoMean(v, na.rm = T)
+    x[i]<-gm
+  }
+  x
+}
+```
+
+### Set mp, bm/mp, Avgs, and SDS
+```{r Set mp, bm/mp, Avgs, and SDS}
+#Set 0 values to NA
+DF2[DF2==0]<-NA
+#compute ratios
+DF2$acs1.b731 <- DF2$acs1/DF2$b731
+DF2$acs2.b732 <- DF2$acs2/DF2$b732
+DF2$acs3.b733 <- DF2$acs3/DF2$b733
+DF2$acs4.b734 <- DF2$acs4/DF2$b734
+DF2$acs5.b735 <- DF2$acs5/DF2$b735
+#Take geometric mean of ratios
+DF2$avg.acs.b73 <- ACSgeomean2(DF2)
+#calculate standard deviation of ratios
+DF2$sds.acs.b73 <- rowSds(as.matrix(DF2[,16:20]), na.rm = T)
+```
+
+### Subset to sig, above, and below
+```{r Subset to sig, above, and below}
+DF2.acs.sig <- DF2[(which(DF2$sds.acs.b73<0.1)),]
+
+DF2.acs.sig.10above <- DF2.acs.sig[(which(DF2.acs.sig$avg.acs.b73>1.1)),]
+DF2.acs.sig.10below <- DF2.acs.sig[(which(DF2.acs.sig$avg.acs.b73<0.9)),]
+```
+
+
+### calculate Log2(fold change)
+```{r calculate Log2(fold change)}
+DF2$avg.acs.b73.l2fc <- log2(DF2$avg.acs.b73)
+
+DF2$acs1.b731.l2fc <- log2(DF2$acs1.b731)
+DF2$acs2.b732.l2fc <- log2(DF2$acs2.b732)
+DF2$acs3.b733.l2fc <- log2(DF2$acs3.b733)
+DF2$acs4.b734.l2fc <- log2(DF2$acs4.b734)
+DF2$acs5.b735.l2fc <- log2(DF2$acs5.b735)
+```
+
+```{r}
+saveRDS(DF2, "DF2")
+```
+
+```{r}
+DF2 <- readRDS("DF2")
+```
+
+
+### Subset without duplicate UIDs for KEGG
+```{r Subset without duplicate UIDs for KEGG}
+DF2_NoDupUID <- DF2[!(duplicated(DF2$UID) | is.na(DF2$UID)),]
+
+nrow(DF2)
+nrow(DF2_NoDupUID)
+```
+
+```{r Save l2fc data for CornCyc analysis, eval=FALSE, echo=FALSE}
+DF2_NoDupUID.txt <- DF2_NoDupUID[,c(4,23)]
+write.table(DF2_NoDupUID.txt, "Prot_acs_l2fc_Repeat.txt", sep="\t", row.names = F, col.names = F)
+```
+
+### subset to hyb and acs l2fc DFs for KEGG
+```{r subset to hyb and acs l2fc DF2s for KEGG}
+DF2.acs.l2fc <- DF2_NoDupUID[,24:28]
+rownames(DF2.acs.l2fc) <- DF2_NoDupUID$UID
+
+#Remove the one row of NA - dont know where this came from (?)
+#DF2.acs.sig.10below <- DF2.acs.sig.10below[!(is.na(DF2.acs.sig.10below$GI)),]
+#DF2.acs.sig.10above <- DF2.acs.sig.10above[!(is.na(DF2.acs.sig.10above$GI)),]
+```
+
+# KEGG
+## Pathview and GAGE to create KEGG maps
+### Define gsets and run gage on acs and hyb
+```{r Define gsets and run gage on acs and hyb}
+zma <- kegg.gsets(species = "zma", id.type = "entrez")
+
+keggres_ACS_DF_Repeat <- gage(DF2.acs.l2fc, gsets = zma$kg.sets, samp = c(1:3), same.dir = T)
+```
+
+### PVfun
+```{r PVfun}
+PVfun <- function(keggres, foldchangev){
+  dir.create(paste0((deparse(substitute(keggres))), "_",(deparse(substitute(foldchangev))),"/"))
+setwd(paste0((deparse(substitute(keggres))), "_",(deparse(substitute(foldchangev))),"/"))
+keggres_df = as.data.frame(keggres)
+keggres_df_sig = na.omit(keggres_df[(keggres_df$p.val<0.05),])
+
+V = rownames(keggres_df_sig)
+Va = substr(V, start = 1, stop = 8)
+Vb = substr(V, start = 10, stop = 100)
+Vm =cbind(Va, Vb)
+
+for(i in 1:nrow(Vm)){
+  pathview(gene.data=foldchangev, pathway.id=Vm[i,1], species = "zma", out.suffix = (paste0(Vm[i,2], (deparse(substitute(keggres))))))
+  }
+}
+```
+
+
+```{r PVfun run, eval=FALSE, echo=FALSE}
+PVfun(keggres_ACS_DF_Repeat$greater, DF2.acs.l2fc)
+PVfun(keggres_ACS_DF_Repeat$less, DF2.acs.l2fc)
+```
+```{r}
+pathview(DF2.acs.l2fc, pathway.id = "zma00010", species = "zma")
+```
+
+```{r}
+write.csv(keggres_ACS_DF_Repeat$greater, "keggres_ACS_DF_Repeat_greater.csv")
+write.csv(keggres_ACS_DF_Repeat$less, "keggres_ACS_DF_Repeat_less.csv")
+```
+
+### Check which genes are significantly altered in a given KEGG term
+```{r SelectSigKEGGgenes function}
+SelectSigKEGGgenes <- function(zma.kgsets.term, l2fc){
+  x <- gage::essGene(zma.kgsets.term, l2fc)
+  x$UID <- rownames(x)
+  x2 <- merge.data.frame(x, DF2, by.x = "UID", by.y = "UID")
+  x2
+}
+```
+```{r SelectSigKEGGgenes run}
+SelectSigKEGGgenes(zma$kg.sets$`zma04712 Circadian rhythm - plant`, DF2.acs.l2fc)
+```
+
+
+```{r KEGG:AminoAcidBio, eval=FALSE, echo=FALSE}
+BiosynthesisAAs <- pathview(gene.data = DF2.acs.l2fc, pathway.id = "zma01230", species="zma", out.suffix = "BiosynthesisAAs_HYB", keys.align = "y", kegg.native = F, match.data = F, multi.state = T, same.layer = T, cex=0.125, afactor=3, map.null = T, expand.node = T)
+```
+
+
+
+# GO analysis
+## TopGO and Gamer
+
+```{r gamer_ReadIn, include=FALSE, eval=FALSE, echo=FALSE}
+# Read in Maize GAMER GO dataset, which lists V4 accessions with all associated GO terms (Wimalanathan et al. 2018) downloaded from doi.org/10.7946/P2M925
+#unzip("maize.B73.AGPv4.aggregate.gaf.zip")
+GAMER <- read.delim("maize.B73.AGPv4.aggregate.gaf", sep = "\t", header = FALSE, stringsAsFactors = F)
+colnames(GAMER) <- c("db", "db_object_id", "db_object_symbol", "qualifier", "term_accession", "db_reference", "evidence_code", "with", "aspect", "db_object_name", "db_object_synonym", "db_object_type", "taxon", "date", "assigned_by", "annotation_extension", "gene_product_form_id")
+saveRDS(GAMER, "GAMER")
+```
+### gamer cut
+```{r gamer cut}
+GAMER <- readRDS("GAMER")
+gamer <- GAMER[-(1:2),]
+gamer$Term <- Term(as.character(gamer$term_accession))
+
+#Make gamer dataframe trimmed to only proteins detected in this run to use as background control set for enrichment analyses (input for "GamerCut" in GOanalysisGodata function)
+GamerCut2 <- gamer[(gamer$db_object_id %in% DF2$V4),]
+```
+
+### GOanalysis functions
+```{r GOanalysis functions}
+## Build GOdata object
+# EnrichedDF = DF with V4 accessions for GOIs in column named "V4"
+# GamerCut = GAMER dataframe trimmed to control set
+# ont = "BP", "MF", or "CC"
+GOanalysisGodata <- function(EnrichedDF, GamerCut, ont, nodesize = 1){
+  gene2GO_TissueCut <- split((as.character(GamerCut$term_accession)),GamerCut$db_object_id)
+  gene2GOb_TissueCut <- gene2GO_TissueCut[-2]
+  str(head(gene2GOb_TissueCut))
+  geneNames_tissuecut <- names(gene2GOb_TissueCut)
+  myInterestingGenes <- EnrichedDF$V4
+  myInterestingGenes <- na.omit(myInterestingGenes)
+  geneList <- factor(as.integer(geneNames_tissuecut %in% myInterestingGenes))
+  names(geneList) <- geneNames_tissuecut
+  GOdata <- new("topGOdata", ontology = ont, allGenes = geneList, annot = annFUN.gene2GO, nodeSize=nodesize, gene2GO = gene2GOb_TissueCut)
+  GOdata
+}
+
+## GO analysis function to generate dataframe summary of top 20 of GO terms
+# GOdata = Godata object (output of GoanalysisGodata function)
+
+GOanalysisDF <- function(GOdata){
+resultFis <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
+test.statF <- new("classicCount", testStatistic = GOFisherTest, name = "Fisher test")
+resultFisher <- getSigGroups(GOdata, test.statF)
+test.statKS <- new("classicScore", testStatistic = GOKSTest, name = "KS tests")
+resultKS <- getSigGroups(GOdata, test.statKS)
+test.statRW <- new("weightCount", testStatistic = GOFisherTest, name = "Fisher test", sigRatio = "ratio")
+resultWeight <- getSigGroups(GOdata, test.statRW)
+DF <- GenTable(GOdata, classic = resultFis, KS = resultKS, weight = resultWeight, orderBy = "classic", ranksOf = "classic", topNodes = 100)
+DF
+}
+
+GOanalysisDF.list <- function(l){
+  dir.create("GOdata.DFs/")
+  setwd("GOdata.DFs/")
+  l2 <- list(NULL)
+  for(i in 1:length(l)){
+   DF <- GOanalysisDF(l[[i]])
+  png((paste0((names(l[i])), ".png")), height = 500, width=900)
+  p<-tableGrob(DF[1:15,], rows = c())
+  grid.arrange(p)
+  dev.off()
+  l2[[i]]<-DF
+  }
+  names(l2)<- names(l)
+  l2
+}
+
+## GO analysis function to build map of top GO terms, output to pdf
+# GOdata = Godata object (output of GoanalysisGodata function)
+GOanalysisMap <- function(GOdata, nodes=10){
+  resultFis <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
+  printGraph(GOdata, resultFis, firstSigNodes = nodes, fn.prefix = (paste0(c(deparse(substitute(GOdata))),".png")), useInfo = "all", pdfSW = TRUE)
+}
+```
+
+```{r GO analyses, eval=FALSE, echo=FALSE}
+#above
+DF2.acs.sig.10above.godataBP <- GOanalysisGodata(DF2.acs.sig.10above, GamerCut2, "BP")
+DF2.acs.sig.10above.godataCC <- GOanalysisGodata(DF2.acs.sig.10above, GamerCut2, "CC")
+DF2.acs.sig.10above.godataMF <- GOanalysisGodata(DF2.acs.sig.10above, GamerCut2, "MF")
+#below
+DF2.acs.sig.10below.godataBP <- GOanalysisGodata(DF2.acs.sig.10below, GamerCut2, "BP")
+DF2.acs.sig.10below.godataCC <- GOanalysisGodata(DF2.acs.sig.10below, GamerCut2, "CC")
+DF2.acs.sig.10below.godataMF <- GOanalysisGodata(DF2.acs.sig.10below, GamerCut2, "MF")
+
+GOdata2.list <- list("DF2.acs.sig.10above.godataBP"=DF2.acs.sig.10above.godataBP, "DF2.acs.sig.10above.godataCC"=DF2.acs.sig.10above.godataCC, "DF2.acs.sig.10above.godataMF"=DF2.acs.sig.10above.godataMF,
+"DF2.acs.sig.10below.godataBP"=DF2.acs.sig.10below.godataBP, "DF2.acs.sig.10below.godataCC"=DF2.acs.sig.10below.godataCC, "DF2.acs.sig.10below.godataMF"=DF2.acs.sig.10below.godataMF)
+#Save GOdata list
+saveRDS(GOdata2.list, "GOdata2.list")
+#Build GO term enrichment tables
+GO.DF2.l <- GOanalysisDF.list(GOdata2.list)
+#Save list of GO term enrichment tables
+saveRDS(GO.DF2.l, "GO.DF2.l")
+```
+
+```{r}
+#Load back in GOdata list and GO term enrichment table list
+#GOdata2.list <- readRDS("GOdata2.list")
+#GO.DF2.l <- readRDS("GO.DF2.l")
+
+printDFs <- function(l){
+for(i in 1:length(l)){
+  print(names(l[i]))
+  print((l[[i]][1:10,1:6]))}
+}
+printDFs(GO.DF2.l)
+```
+
+```{r Venn Diagrams, eval=FALSE, echo=FALSE}
+VennDiagram::venn.diagram(list("BxM"=na.omit(DF_PrevSL.bm.sig.10above$GI), "acs2/6"=na.omit(DF2.acs.sig.10above$GI)), main = "Proteins 10% above expected (sd<0.1)", main.cex = 2, cex=2, cat.cex=1.5, filename = "DF2_PrevSL_10aboveVenn.png", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(0,0), main.pos = c(0.5,0.95))
+
+VennDiagram::venn.diagram(list("BxM"=na.omit(DF_PrevSL.bm.sig.10below)$GI, "acs2/6"=na.omit(DF2.acs.sig.10below$GI)), main = "Proteins 10% below expected (sd<0.1)",main.cex = 2, cex=2, cat.cex=1.5, filename = "DF2_PrevSL_10belowVenn.png", ext.text=F, fill=c("orange", "yellow"), cat.pos=c(0,0), main.pos = c(0.5,0.95))
+```
+
+
+### Subset DFs to discrete sections of Venn Diagrams
+```{r Subset DF2s to discrete sections of Venn Diagrams}
+DF2.bm.AND.acs.sig.10above <- DF_PrevSL.bm.sig.10above[(DF_PrevSL.bm.sig.10above$GI%in%DF2.acs.sig.10above$GI),]
+DF2.bm.NOT.acs.sig.10above <- DF_PrevSL.bm.sig.10above[!(DF_PrevSL.bm.sig.10above$GI%in%DF2.acs.sig.10above$GI),]
+DF2.acs.NOT.bm.sig.10above <- DF2.acs.sig.10above[!(DF2.acs.sig.10above$GI%in%DF_PrevSL.bm.sig.10above$GI),]
+
+DF2.bm.AND.acs.sig.10below <- DF_PrevSL.bm.sig.10below[(DF_PrevSL.bm.sig.10below$GI%in%DF2.acs.sig.10below$GI),]
+DF2.bm.NOT.acs.sig.10below <- DF_PrevSL.bm.sig.10below[!(DF_PrevSL.bm.sig.10below$GI%in%DF2.acs.sig.10below$GI),]
+DF2.acs.NOT.bm.sig.10below <- DF2.acs.sig.10below[!(DF2.acs.sig.10below$GI%in%DF_PrevSL.bm.sig.10below$GI),]
+
+#check that we got everything
+(nrow(DF2.bm.AND.acs.sig.10above)+nrow(DF2.bm.NOT.acs.sig.10above)+nrow(DF2.acs.NOT.bm.sig.10above))==(length(unique(c(DF_PrevSL.bm.sig.10above$GI,DF2.acs.sig.10above$GI))))
+
+(nrow(DF2.bm.AND.acs.sig.10below)+nrow(DF2.bm.NOT.acs.sig.10below)+nrow(DF2.acs.NOT.bm.sig.10below))==(length(unique(c(DF_PrevSL.bm.sig.10below$GI,DF2.acs.sig.10below$GI))))
+```
+
+```{r GO analysis venn diagram sections, eval=FALSE, echo=FALSE}
+#above
+DF2.bm.AND.acs.sig.10above_GodataBP <- GOanalysisGodata(DF2.bm.AND.acs.sig.10above, GamerCut2, "BP")
+DF2.bm.NOT.acs.sig.10above_GodataBP <- GOanalysisGodata(DF2.bm.NOT.acs.sig.10above, GamerCut2, "BP")
+DF2.acs.NOT.bm.sig.10above_GodataBP <- GOanalysisGodata(DF2.acs.NOT.bm.sig.10above, GamerCut2, "BP")
+
+DF2.bm.AND.acs.sig.10above_GodataCC <- GOanalysisGodata(DF2.bm.AND.acs.sig.10above, GamerCut2, "CC")
+DF2.bm.NOT.acs.sig.10above_GodataCC <- GOanalysisGodata(DF2.bm.NOT.acs.sig.10above, GamerCut2, "CC")
+DF2.acs.NOT.bm.sig.10above_GodataCC <- GOanalysisGodata(DF2.acs.NOT.bm.sig.10above, GamerCut2, "CC")
+
+DF2.bm.AND.acs.sig.10above_GodataMF <- GOanalysisGodata(DF2.bm.AND.acs.sig.10above, GamerCut2, "MF")
+DF2.bm.NOT.acs.sig.10above_GodataMF <- GOanalysisGodata(DF2.bm.NOT.acs.sig.10above, GamerCut2, "MF")
+DF2.acs.NOT.bm.sig.10above_GodataMF <- GOanalysisGodata(DF2.acs.NOT.bm.sig.10above, GamerCut2, "MF")
+
+#below
+DF2.bm.AND.acs.sig.10below_GodataBP <- GOanalysisGodata(DF2.bm.AND.acs.sig.10below, GamerCut2, "BP")
+DF2.bm.NOT.acs.sig.10below_GodataBP <- GOanalysisGodata(DF2.bm.NOT.acs.sig.10below, GamerCut2, "BP")
+DF2.acs.NOT.bm.sig.10below_GodataBP <- GOanalysisGodata(DF2.acs.NOT.bm.sig.10below, GamerCut2, "BP")
+
+DF2.bm.AND.acs.sig.10below_GodataCC <- GOanalysisGodata(DF2.bm.AND.acs.sig.10below, GamerCut2, "CC")
+DF2.bm.NOT.acs.sig.10below_GodataCC <- GOanalysisGodata(DF2.bm.NOT.acs.sig.10below, GamerCut2, "CC")
+DF2.acs.NOT.bm.sig.10below_GodataCC <- GOanalysisGodata(DF2.acs.NOT.bm.sig.10below, GamerCut2, "CC")
+
+DF2.bm.AND.acs.sig.10below_GodataMF <- GOanalysisGodata(DF2.bm.AND.acs.sig.10below, GamerCut2, "MF")
+DF2.bm.NOT.acs.sig.10below_GodataMF <- GOanalysisGodata(DF2.bm.NOT.acs.sig.10below, GamerCut2, "MF")
+DF2.acs.NOT.bm.sig.10below_GodataMF <- GOanalysisGodata(DF2.acs.NOT.bm.sig.10below, GamerCut2, "MF")
+
+GOdata.venn.list <- list("DF2.bm.AND.acs.sig.10above_GodataBP"=DF2.bm.AND.acs.sig.10above_GodataBP,"DF2.bm.NOT.acs.sig.10above_GodataBP"=DF2.bm.NOT.acs.sig.10above_GodataBP, "DF2.acs.NOT.bm.sig.10above_GodataBP"=DF2.acs.NOT.bm.sig.10above_GodataBP, "DF2.bm.AND.acs.sig.10above_GodataCC"=DF2.bm.AND.acs.sig.10above_GodataCC, "DF2.bm.NOT.acs.sig.10above_GodataCC"=DF2.bm.NOT.acs.sig.10above_GodataCC, "DF2.acs.NOT.bm.sig.10above_GodataCC"=DF2.acs.NOT.bm.sig.10above_GodataCC, "DF2.bm.AND.acs.sig.10above_GodataMF"=DF2.bm.AND.acs.sig.10above_GodataMF, "DF2.bm.NOT.acs.sig.10above_GodataMF"=DF2.bm.NOT.acs.sig.10above_GodataMF, "DF2.acs.NOT.bm.sig.10above_GodataMF"=DF2.acs.NOT.bm.sig.10above_GodataMF, "DF2.bm.AND.acs.sig.10below_GodataBP"=DF2.bm.AND.acs.sig.10below_GodataBP, "DF2.bm.NOT.acs.sig.10below_GodataBP"=DF2.bm.NOT.acs.sig.10below_GodataBP, "DF2.acs.NOT.bm.sig.10below_GodataBP"=DF2.acs.NOT.bm.sig.10below_GodataBP, "DF2.bm.AND.acs.sig.10below_GodataCC"=DF2.bm.AND.acs.sig.10below_GodataCC, "DF2.bm.NOT.acs.sig.10below_GodataCC"=DF2.bm.NOT.acs.sig.10below_GodataCC, "DF2.acs.NOT.bm.sig.10below_GodataCC"=DF2.acs.NOT.bm.sig.10below_GodataCC, "DF2.bm.AND.acs.sig.10below_GodataMF"=DF2.bm.AND.acs.sig.10below_GodataMF, "DF2.bm.NOT.acs.sig.10below_GodataMF"=DF2.bm.NOT.acs.sig.10below_GodataMF, "DF2.acs.NOT.bm.sig.10below_GodataMF"=DF2.acs.NOT.bm.sig.10below_GodataMF)
+#Save GOdata list
+saveRDS(GOdata.venn.list, "GOdata.venn.list")
+#Build GO term enrichment tables
+GO.venn.DF2.l <- GOanalysisDF.list(GOdata.venn.list)
+#Save list of GO term enrichment tables
+saveRDS(GO.venn.DF2.l, "GO.venn.DF2.l")
+```
+
+### Select Significant genes from given GO term in a GOdata object and return their proteins
+```{r SelectSigGOgenes function}
+SelectSigGOgenes <- function(GOdata, GOterm){
+ df <- data.frame(gene=(topGO::genesInTerm(GOdata, GOterm)), score=(topGO::scoresInTerm(GOdata, GOterm))) 
+ colnames(df) <- c("gene", "score")
+ df$gene <- as.character(df$gene)
+ df.s <- df[(df$score==2),]
+ df.s.prot <- merge.data.frame(df.s, DF2, by.x = "gene", by.y = "V4")
+ df.s.prot[(order(-df.s.prot$avg.acs.b73.l2fc)),]
+}
+```
+
+
+
+#Scatterplots
+```{r}
+DF_PrevSL <- readRDS("DF_PrevSL")
+```
+```{r ScatterPlotFun.GOterm function}
+ScatterPlotFun.GOterm <- function(godata, term){
+  name <- annotate::getGOTerm(term)
+  names(name) <- "name"
+  as.name(name$name)
+
+  DF2.all.cut <- DF2[,c(5,21)]
+  DF_PrevSL.all.cut <- DF_PrevSL[,c(5,21)]
+  DF2.all.cut.DF_PrevSL.all.cut <- merge.data.frame(DF2.all.cut, DF_PrevSL.all.cut, by="Protein", all=F)
+  DF2.all.cut.DF_PrevSL.all.cut$ID <- "all"
+
+  go <- (topGO::genesInTerm(godata, term))
+  names(go)<-"go"
+  
+  sub_df2 <- DF2[(DF2$V4%in%go$go),]
+  sub_df_prevsl <- DF_PrevSL[(DF_PrevSL$V4%in%go$go),]
+  
+  sub_df2.cut <- sub_df2[,c(5,21)]
+  sub_df_prevsl.cut <- sub_df_prevsl[,c(5,21)]
+  
+  df_merge <- merge.data.frame(sub_df2.cut, sub_df_prevsl.cut, by="Protein", all=F)
+  df_merge$ID <- term
+  
+  df_rbind <- rbind(DF2.all.cut.DF_PrevSL.all.cut, df_merge)
+  df_rbind$avg.acs.b73 <- log2(df_rbind$avg.acs.b73)
+  df_rbind$avg.bm.mp <- log2(df_rbind$avg.bm.mp)
+  df_rbind$avg.acs.b73[df_rbind$avg.acs.b73 > 1.0]<- 1.0
+  df_rbind$avg.acs.b73[df_rbind$avg.acs.b73 < -1.0]<- -1.0
+  df_rbind$avg.bm.mp[df_rbind$avg.bm.mp > 1.0]<- 1.0
+  df_rbind$avg.bm.mp[df_rbind$avg.bm.mp < -1.0]<- -1.0
+  
+  df_merge2 <- merge.data.frame(sub_df2.cut, sub_df_prevsl.cut, by="Protein", all=T)
+  df_merge2$ID <- term
+  
+  df_rbind2 <- rbind(DF2.all.cut.DF_PrevSL.all.cut, df_merge2)
+  df_rbind2$avg.acs.b73 <- log2(df_rbind2$avg.acs.b73)
+  df_rbind2$avg.bm.mp <- log2(df_rbind2$avg.bm.mp)
+  df_rbind2$avg.acs.b73[df_rbind2$avg.acs.b73 > 1.0]<- 1.0
+  df_rbind2$avg.acs.b73[df_rbind2$avg.acs.b73 < -1.0]<- -1.0
+  df_rbind2$avg.bm.mp[df_rbind2$avg.bm.mp > 1.0]<- 1.0
+  df_rbind2$avg.bm.mp[df_rbind2$avg.bm.mp < -1.0]<- -1.0
+  
+  ggplot(df_rbind, mapping = aes(x=avg.acs.b73, y=avg.bm.mp, color=ID))+
+  geom_point(size=.5)+
+  theme_bw()+
+  scale_color_manual(values=c("grey80","blue", "red"))+
+  ylab("log2(BxM/MP)")+
+  xlab("log2(acs/B73)")+
+  geom_abline(slope = 1, color="grey50", size=.5)+
+  geom_vline(color="grey50", size=.5, xintercept = 0)+
+  geom_hline(color="grey50", size=.5, yintercept = 0)+
+  coord_fixed(expand = F)+
+  xlim(-1,1)+
+  ylim(-1,1)+
+  theme(legend.position = "bottom")
+ggsave(paste0("ScatterPlots/Repeat_Scatter_Shared_GO", name, ".png"))
+
+  ggplot(df_rbind, mapping = aes(x=avg.acs.b73, color=ID))+
+  geom_density()+
+  theme_bw()+
+  scale_color_manual(values=c("grey80","blue", "red"))+
+  theme(axis.title=element_blank(), axis.text = element_blank(), axis.ticks = element_blank())+
+  theme(panel.grid = element_blank(),
+        panel.border = element_blank())+
+  xlim(-1,1)+
+  ylim(0,4)+
+  coord_cartesian(expand = F)+
+  theme(legend.position = "none")
+ggsave(paste0("ScatterPlots/Repeat_Xdensity_Shared_GO", name, ".png"), width = 2, height=1)
+
+  ggplot(df_rbind, mapping = aes(x=avg.bm.mp, color=ID))+
+  geom_density()+
+  theme_bw()+
+  scale_color_manual(values=c("grey80","blue", "red"))+
+  theme(axis.title=element_blank(), axis.text = element_blank(), axis.ticks = element_blank())+
+  theme(panel.grid = element_blank(),
+        panel.border = element_blank())+
+  xlim(-1,1)+
+  ylim(0,4)+
+  coord_cartesian(expand = F)+
+  theme(legend.position = "none")
+ggsave(paste0("ScatterPlots/Repeat_Ydensity_Shared_GO", name, ".png"), width = 2, height=1)
+
+sub_df2.cut$color="unique"
+sub_df2.cut$color[sub_df2.cut$Protein%in%df_rbind$Protein]<- "shared"
+ ggplot(sub_df2.cut, mapping = aes(x=reorder(sub_df2.cut$Protein, sub_df2.cut$avg.acs.b73), y=avg.acs.b73, fill=color))+
+  geom_bar(stat = "identity")+
+  scale_fill_manual(values=c("grey80", "blue"))+
+  theme(panel.background = element_blank())+
+  geom_hline(color="grey50", size=.5, yintercept = 1)+
+  ggtitle(paste0("Repeat: acs/B73 expression: Proteins from GO:", name))+
+  xlab("acs/B73")+
+  ylab((paste0("Proteins from GO:", name)))+
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+ggsave(paste0("ScatterPlots/Repeat_Xbar_allACS_GO", name, ".png"))
+
+  ggplot(df_rbind2, mapping = aes(x=avg.acs.b73, color=ID))+
+  geom_density()+
+  theme_bw()+
+  scale_color_manual(values=c("grey80","blue", "red"))+
+  theme(axis.title=element_blank(), axis.text = element_blank(), axis.ticks = element_blank())+
+  theme(panel.grid = element_blank(),
+        panel.border = element_blank())+
+  xlim(-1,1)+
+  ylim(0,4)+
+  coord_cartesian(expand = F)+
+  theme(legend.position = "none")
+ggsave(paste0("ScatterPlots/Repeat_Xdensity_All_GO", name, ".png"), width = 2, height=1)
+
+  ggplot(df_rbind2, mapping = aes(x=avg.bm.mp, color=ID))+
+  geom_density()+
+  theme_bw()+
+  scale_color_manual(values=c("grey80","blue", "red"))+
+  theme(axis.title=element_blank(), axis.text = element_blank(), axis.ticks = element_blank())+
+  theme(panel.grid = element_blank(),
+        panel.border = element_blank())+
+  xlim(-1,1)+
+  ylim(0,4)+
+  coord_cartesian(expand = F)+
+  theme(legend.position = "none")
+ggsave(paste0("ScatterPlots/Repeat_Ydensity_All_GO", name, ".png"), width = 2, height=1)
+}
+```
+```{r ScatterPlotFun.grep function}
+ScatterPlotFun.grep <- function(name){
+    DF2.all.cut <- DF2[,c(5,21)]
+  DF_PrevSL.all.cut <- DF_PrevSL[,c(5,21)]
+  DF2.all.cut.DF_PrevSL.all.cut <- merge.data.frame(DF2.all.cut, DF_PrevSL.all.cut, by="Protein", all=F)
+  DF2.all.cut.DF_PrevSL.all.cut$ID <- "all"
+  
+  sub_df2 <- DF2[(grep(name, DF2$Protein)),]
+  sub_df_prevsl <- DF_PrevSL[(grep(name, DF_PrevSL$Protein)),]
+  sub_df2.cut <- sub_df2[,c(5,21)]
+  sub_df_prevsl.cut <- sub_df_prevsl[,c(5,21)]
+  df_merge <- merge.data.frame(sub_df2.cut, sub_df_prevsl.cut, by="Protein", all=F)
+  df_merge$ID <- name
+  df_rbind <- rbind(DF2.all.cut.DF_PrevSL.all.cut, df_merge)
+  df_rbind$avg.acs.b73 <- log2(df_rbind$avg.acs.b73)
+  df_rbind$avg.bm.mp <- log2(df_rbind$avg.bm.mp)
+  df_rbind$avg.acs.b73[df_rbind$avg.acs.b73>1.0]<- 1.0
+  df_rbind$avg.acs.b73[df_rbind$avg.acs.b73< -1.0]<- -1.0
+  df_rbind$avg.bm.mp[df_rbind$avg.bm.mp>1.0]<- 1.0
+  df_rbind$avg.bm.mp[df_rbind$avg.bm.mp< -1.0]<- -1.0
+
+  ggplot(df_rbind, mapping = aes(x=avg.acs.b73, y=avg.bm.mp, color=ID))+
+  geom_point(size=.5)+
+  theme_bw()+
+  scale_color_manual(values = c("blue","grey60"))+
+  ylab("log2(BxM/MP)")+
+  xlab("log2(acs/B73)")+
+  geom_abline(slope = 1, color="grey50", size=.5)+
+  geom_vline(color="grey50", size=.5, xintercept = 0)+
+  geom_hline(color="grey50", size=.5, yintercept = 0)+
+  coord_fixed(expand = F)+
+  xlim(-1,1)+
+  ylim(-1,1)+
+  ggtitle(paste0("Repeat: Shared grep:", name, " Proteins"))
+ggsave(paste0("ScatterPlots/Repeat_Scatter_Shared_grep_", name, ".png"))
+}
+```
+```{r ScatterPlotFun.v function}
+ScatterPlotFun.v <- function(v4v){
+    DF2.all.cut <- DF2[,c(5,21)]
+  DF_PrevSL.all.cut <- DF_PrevSL[,c(5,21)]
+  DF2.all.cut.DF_PrevSL.all.cut <- merge.data.frame(DF2.all.cut, DF_PrevSL.all.cut, by="Protein", all=F)
+  DF2.all.cut.DF_PrevSL.all.cut$ID <- "all"
+  
+  sub_df2 <- DF2[(DF2$V4%in%v4v),]
+  sub_df_prevsl <- DF_PrevSL[(DF_PrevSL$V4%in%v4v),]
+  sub_df2.cut <- sub_df2[,c(5,21)]
+  sub_df_prevsl.cut <- sub_df_prevsl[,c(5,21)]
+  df_merge <- merge.data.frame(sub_df2.cut, sub_df_prevsl.cut, by="Protein", all=F)
+  df_merge$ID <- deparse(substitute(v4v))
+  df_rbind <- rbind(DF2.all.cut.DF_PrevSL.all.cut, df_merge)
+  df_rbind$avg.acs.b73 <- log2(df_rbind$avg.acs.b73)
+  df_rbind$avg.bm.mp <- log2(df_rbind$avg.bm.mp)
+  df_rbind$avg.acs.b73[df_rbind$avg.acs.b73>1.0]<- 1.0
+  df_rbind$avg.acs.b73[df_rbind$avg.acs.b73< -1.0]<- -1.0
+  df_rbind$avg.bm.mp[df_rbind$avg.bm.mp>1.0]<- 1.0
+  df_rbind$avg.bm.mp[df_rbind$avg.bm.mp< -1.0]<- -1.0
+
+  ggplot(df_rbind, mapping = aes(x=avg.acs.b73, y=avg.bm.mp, color=ID))+
+  geom_point(size=.5)+
+  theme_bw()+
+  scale_color_manual(values = c("grey60", "blue"))+
+  ylab("log2(BxM/MP)")+
+  xlab("log2(acs/B73)")+
+  geom_abline(slope = 1, color="grey50", size=.5)+
+  geom_vline(color="grey50", size=.5, xintercept = 0)+
+  geom_hline(color="grey50", size=.5, yintercept = 0)+
+  coord_fixed(expand = F)+
+  xlim(-1,1)+
+  ylim(-1,1)+
+  ggtitle(paste0("Repeat: Shared grep:", deparse(substitute(v4v)), " Proteins"))
+ggsave(paste0("ScatterPlots/Repeat_Scatter_Shared_grep_", deparse(substitute(v4v)), ".png"))
+}
+```
+
+```{r}
+DF2.PE <- DF2[(grep("NP_04",DF2$Protein)),]
+DF2.PE.PII <- DF2.PE[(grep("photosystem II", DF2.PE$Protein)),]
+DF2.PE.PI <- DF2.PE[(grep("photosystem I ", DF2.PE$Protein)),]
+DF2.NE <- DF2[-(grep("NP_04",DF2$Protein)),]
+DF2.NE.PII <- DF2.NE[(grep("photosystem II", DF2.NE$Protein)),]
+DF2.NE.PI <- DF2.NE[(grep("photosystem I ", DF2.NE$Protein)),]
+
+DF2.PE.RibS <- DF2.PE[(grep("ribosomal protein S",DF2.PE$Protein)),]
+DF2.PE.RibL <- DF2.PE[(grep("ribosomal protein L",DF2.PE$Protein)),]
+DF2.NE.30S <- DF2[(grep("30S", DF2$Protein)),]
+DF2.NE.50S <- DF2[(grep("50S", DF2$Protein)),]
+```
+
+```{r}
+DF2.PE.PI.trim <- DF2.PE.PI[,c(5,21)]
+DF2.NE.PI.trim <- DF2.NE.PI[,c(5,21)]
+DF2.PE.PII.trim <- DF2.PE.PII[,c(5,21)]
+DF2.NE.PII.trim <- DF2.NE.PII[,c(5,21)]
+
+DF2.PE.RibS.trim <- DF2.PE.RibS[,c(5,21)]
+DF2.PE.RibL.trim <- DF2.PE.RibL[,c(5,21)]
+DF2.NE.30S.trim <- DF2.NE.30S[,c(5,21)]
+DF2.NE.50S.trim <- DF2.NE.50S[,c(5,21)]
+```
+```{r}
+DF2.PE.PI.trim.m <- melt(DF2.PE.PI.trim)
+DF2.NE.PI.trim.m <- melt(DF2.NE.PI.trim)
+DF2.PE.PII.trim.m <- melt(DF2.PE.PII.trim)
+DF2.NE.PII.trim.m <- melt(DF2.NE.PII.trim)
+
+DF2.PE.RibS.trim.m <- melt(DF2.PE.RibS.trim)
+DF2.PE.RibL.trim.m <- melt(DF2.PE.RibL.trim)
+DF2.NE.30S.trim.m <- melt(DF2.NE.30S.trim)
+DF2.NE.50S.trim.m <- melt(DF2.NE.50S.trim)
+```
+```{r}
+DF2.PE.PI.trim.m$variable <-"PE"
+DF2.NE.PI.trim.m$variable <-"NE"
+DF2.PE.PII.trim.m$variable <-"PE"
+DF2.NE.PII.trim.m$variable <-"NE"
+
+DF2.PE.RibS.trim.m$variable <-"PE"
+DF2.PE.RibL.trim.m$variable <-"PE"
+DF2.NE.30S.trim.m$variable <-"NE"
+DF2.NE.50S.trim.m$variable <-"NE"
+```
+```{r}
+DF2.PE.PI.trim.m<- DF2.PE.PI.trim.m[order(DF2.PE.PI.trim.m$value),]
+DF2.NE.PI.trim.m<- DF2.NE.PI.trim.m[order(DF2.NE.PI.trim.m$value),]
+DF2.PE.PII.trim.m<- DF2.PE.PII.trim.m[order(DF2.PE.PII.trim.m$value),]
+DF2.NE.PII.trim.m<- DF2.NE.PII.trim.m[order(DF2.NE.PII.trim.m$value),]
+
+DF2.PE.RibS.trim.m<- DF2.PE.RibS.trim.m[order(DF2.PE.RibS.trim.m$value),]
+DF2.PE.RibL.trim.m<- DF2.PE.RibL.trim.m[order(DF2.PE.RibL.trim.m$value),]
+DF2.NE.30S.trim.m<- DF2.NE.30S.trim.m[order(DF2.NE.30S.trim.m$value),]
+DF2.NE.50S.trim.m<- DF2.NE.50S.trim.m[order(DF2.NE.50S.trim.m$value),]
+```
+```{r}
+DF2.PI.trim.m.rbind <- rbind(DF2.PE.PI.trim.m, DF2.NE.PI.trim.m)
+DF2.PII.trim.m.rbind <- rbind(DF2.PE.PII.trim.m, DF2.NE.PII.trim.m)
+
+DF2.RibS.trim.m.rbind <- rbind(DF2.PE.RibS.trim.m, DF2.NE.30S.trim.m)
+DF2.RibL.trim.m.rbind <- rbind(DF2.PE.RibL.trim.m, DF2.NE.50S.trim.m)
+```
+```{r}
+DF2.PI.trim.m.rbind$order <- 1:nrow(DF2.PI.trim.m.rbind)
+DF2.PII.trim.m.rbind$order <- 1:nrow(DF2.PII.trim.m.rbind)
+DF2.RibS.trim.m.rbind$order <- 1:nrow(DF2.RibS.trim.m.rbind)
+DF2.RibL.trim.m.rbind$order <- 1:nrow(DF2.RibL.trim.m.rbind)
+```
+```{r}
+ggplot(DF2.PI.trim.m.rbind, mapping = aes(x=reorder(DF2.PI.trim.m.rbind$Protein, DF2.PI.trim.m.rbind$order), y=value, fill=variable))+
+  geom_bar(stat = "identity", position = "dodge")+
+  theme(axis.text.x = element_text(angle = 60, size = 3, hjust = 1))+
+  xlab("Protein")+
+  ylab("acs/B73")+
+  ggtitle("Photosystem I")
+ggsave("PhotosystemI_acs_B73.png")
+```
+```{r}
+ggplot(DF2.PII.trim.m.rbind, mapping = aes(x=reorder(DF2.PII.trim.m.rbind$Protein, DF2.PII.trim.m.rbind$order), y=value, fill=variable))+
+  geom_bar(stat = "identity", position = "dodge")+
+  theme(axis.text.x = element_text(angle = 60, size = 3, hjust = 1))+
+  xlab("Protein")+
+  ylab("acs/B73")+
+  ggtitle("Photosystem II")
+ggsave("PhotosystemII_acs_B73.png")
+```
+```{r}
+ggplot(DF2.RibS.trim.m.rbind, mapping = aes(x=reorder(DF2.RibS.trim.m.rbind$Protein, DF2.RibS.trim.m.rbind$order), y=value, fill=variable))+
+  geom_bar(stat = "identity", position = "dodge")+
+  theme(axis.text.x = element_text(angle = 60, size = 3, hjust = 1))+
+  xlab("Protein")+
+  ylab("acs/B73")+
+  ggtitle("30S subunit")
+```
+```{r}
+DF2.RibS.trim.m.rbind
+```
+
+
+
+```{r}
+DF_PrevSL.PE <- DF_PrevSL[(grep("NP_04",DF_PrevSL$Protein)),]
+DF_PrevSL.PE.PII <- DF_PrevSL.PE[(grep("photosystem II", DF_PrevSL.PE$Protein)),]
+DF_PrevSL.PE.PI <- DF_PrevSL.PE[(grep("photosystem I ", DF_PrevSL.PE$Protein)),]
+DF_PrevSL.NE <- DF_PrevSL[-(grep("NP_04",DF_PrevSL$Protein)),]
+DF_PrevSL.NE.PII <- DF_PrevSL.NE[(grep("photosystem II", DF_PrevSL.NE$Protein)),]
+DF_PrevSL.NE.PI <- DF_PrevSL.NE[(grep("photosystem I ", DF_PrevSL.NE$Protein)),]
+```
+```{r}
+DF_PrevSL.PE.PI.trim <- DF_PrevSL.PE.PI[,c(5,21)]
+DF_PrevSL.NE.PI.trim <- DF_PrevSL.NE.PI[,c(5,21)]
+DF_PrevSL.PE.PII.trim <- DF_PrevSL.PE.PII[,c(5,21)]
+DF_PrevSL.NE.PII.trim <- DF_PrevSL.NE.PII[,c(5,21)]
+```
+```{r}
+DF_PrevSL.PE.PI.trim.m <- melt(DF_PrevSL.PE.PI.trim)
+DF_PrevSL.NE.PI.trim.m <- melt(DF_PrevSL.NE.PI.trim)
+DF_PrevSL.PE.PII.trim.m <- melt(DF_PrevSL.PE.PII.trim)
+DF_PrevSL.NE.PII.trim.m <- melt(DF_PrevSL.NE.PII.trim)
+```
+```{r}
+DF_PrevSL.PE.PI.trim.m$variable <-"PE"
+DF_PrevSL.NE.PI.trim.m$variable <-"NE"
+DF_PrevSL.PE.PII.trim.m$variable <-"PE"
+DF_PrevSL.NE.PII.trim.m$variable <-"NE"
+```
+```{r}
+DF_PrevSL.PE.PI.trim.m<- DF_PrevSL.PE.PI.trim.m[order(DF_PrevSL.PE.PI.trim.m$value),]
+DF_PrevSL.NE.PI.trim.m<- DF_PrevSL.NE.PI.trim.m[order(DF_PrevSL.NE.PI.trim.m$value),]
+DF_PrevSL.PE.PII.trim.m<- DF_PrevSL.PE.PII.trim.m[order(DF_PrevSL.PE.PII.trim.m$value),]
+DF_PrevSL.NE.PII.trim.m<- DF_PrevSL.NE.PII.trim.m[order(DF_PrevSL.NE.PII.trim.m$value),]
+```
+```{r}
+DF_PrevSL.PI.trim.m.rbind <- rbind(DF_PrevSL.PE.PI.trim.m, DF_PrevSL.NE.PI.trim.m)
+DF_PrevSL.PII.trim.m.rbind <- rbind(DF_PrevSL.PE.PII.trim.m, DF_PrevSL.NE.PII.trim.m)
+```
+```{r}
+DF_PrevSL.PI.trim.m.rbind$order <- 1:nrow(DF_PrevSL.PI.trim.m.rbind)
+DF_PrevSL.PII.trim.m.rbind$order <- 1:nrow(DF_PrevSL.PII.trim.m.rbind)
+```
+```{r}
+DF_merge.PI.trim.m.rbind<- merge.data.frame(DF2.PI.trim.m.rbind, DF_PrevSL.PI.trim.m.rbind, by="Protein")
+DF_merge.PI.trim.m.rbind.trim <- DF_merge.PI.trim.m.rbind[,c(1,2,3,6)]
+colnames(DF_merge.PI.trim.m.rbind.trim)<- c("Protein", "encoded","acs_b73", "BM_MP")
+
+DF_merge.PI.trim.m.rbind.trim.NE <- DF_merge.PI.trim.m.rbind.trim[(DF_merge.PI.trim.m.rbind.trim$encoded=="NE"),]
+DF_merge.PI.trim.m.rbind.trim.PE <- DF_merge.PI.trim.m.rbind.trim[(DF_merge.PI.trim.m.rbind.trim$encoded=="PE"),]
+
+DF_merge.PI.trim.m.rbind.trim.NE.m<- melt(DF_merge.PI.trim.m.rbind.trim.NE)
+DF_merge.PI.trim.m.rbind.trim.PE.m <- melt(DF_merge.PI.trim.m.rbind.trim.PE)
+```
+```{r}
+DF_merge.PII.trim.m.rbind<- merge.data.frame(DF2.PII.trim.m.rbind, DF_PrevSL.PII.trim.m.rbind, by="Protein")
+DF_merge.PII.trim.m.rbind.trim <- DF_merge.PII.trim.m.rbind[,c(1,2,3,6)]
+colnames(DF_merge.PII.trim.m.rbind.trim)<- c("Protein", "encoded","acs_b73", "BM_MP")
+
+DF_merge.PII.trim.m.rbind.trim.NE <- DF_merge.PII.trim.m.rbind.trim[(DF_merge.PII.trim.m.rbind.trim$encoded=="NE"),]
+DF_merge.PII.trim.m.rbind.trim.PE <- DF_merge.PII.trim.m.rbind.trim[(DF_merge.PII.trim.m.rbind.trim$encoded=="PE"),]
+
+DF_merge.PII.trim.m.rbind.trim.NE.m<- melt(DF_merge.PII.trim.m.rbind.trim.NE)
+DF_merge.PII.trim.m.rbind.trim.PE.m <- melt(DF_merge.PII.trim.m.rbind.trim.PE)
+```
+
+
+```{r}
+ggplot(DF_merge.PI.trim.m.rbind.trim.NE.m, mapping = aes(x=Protein, y=value, fill=variable))+
+  geom_bar(stat = "identity", position = "dodge")+
+  theme(axis.text.x = element_text(angle = 60, size = 3, hjust = 1))+
+  xlab("Protein")+
+  ylab("BM/MP")+
+  ggtitle("NE-Photosystem I")
+ggsave("NE_PhotosystemI.png")
+```
+```{r}
+ggplot(DF_merge.PI.trim.m.rbind.trim.PE.m, mapping = aes(x=Protein, y=value, fill=variable))+
+  geom_bar(stat = "identity", position = "dodge")+
+  theme(axis.text.x = element_text(angle = 60, size = 3, hjust = 1))+
+  xlab("Protein")+
+  ylab("BM/MP")+
+  ggtitle("PE-Photosystem I")
+ggsave("PE_PhotosystemI.png")
+```
+```{r}
+ggplot(DF_merge.PII.trim.m.rbind.trim.NE.m, mapping = aes(x=Protein, y=value, fill=variable))+
+  geom_bar(stat = "identity", position = "dodge")+
+  theme(axis.text.x = element_text(angle = 60, size = 3, hjust = 1))+
+  xlab("Protein")+
+  ylab("BM/MP")+
+  ggtitle("NE-Photosystem II")
+ggsave("NE_PhotosystemII.png")
+```
+```{r}
+ggplot(DF_merge.PII.trim.m.rbind.trim.PE.m, mapping = aes(x=Protein, y=value, fill=variable))+
+  geom_bar(stat = "identity", position = "dodge")+
+  theme(axis.text.x = element_text(angle = 60, size = 3, hjust = 1))+
+  xlab("Protein")+
+  ylab("BM/MP")+
+  ggtitle("PE-Photosystem II")
+ggsave("PE_PhotosystemII.png")
+```
+
+```{r}
+ggplot(DF_PrevSL.PI.trim.m.rbind, mapping = aes(x=reorder(DF_PrevSL.PI.trim.m.rbind$Protein, DF2.PI.trim.m.rbind$Protein), y=value, fill=variable))+
+  geom_bar(stat = "identity", position = "dodge")+
+  theme(axis.text.x = element_text(angle = 60, size = 3, hjust = 1))+
+  xlab("Protein")+
+  ylab("BM/MP")+
+  ggtitle("Photosystem I")
+ggsave("PhotosystemI_SL_BM_MP.png")
+```
+```{r}
+ggplot(DF_PrevSL.PII.trim.m.rbind, mapping = aes(x=reorder(DF_PrevSL.PII.trim.m.rbind$Protein, DF_PrevSL.PII.trim.m.rbind$order), y=value, fill=variable))+
+  geom_bar(stat = "identity", position = "dodge")+
+  theme(axis.text.x = element_text(angle = 60, size = 3, hjust = 1))+
+  xlab("Protein")+
+  ylab("BM/MP")+
+  ggtitle("Photosystem II")
+ggsave("PhotosystemII_SL_BM_MP.png")
+```
+
+```{r}
+ScatterPlotFun.GOterm(GOdata2.list$DF2.acs.sig.10below.godataBP, "GO:0006631")
+```
+```{r}
+ScatterPlotFun.grep("40S|60S")
+```
+```{r}
+DF2.ribosomal.cut <- DF2.ribosomal[,c(5,21)]
+DF2.ribosomal.cut.DF_PrevSL.ribosomal.cut <- merge.data.frame(DF2.ribosomal.cut, DF_PrevSL.ribosomal.cut, by="Protein", all=F)
+DF2.ribosomal.cut.DF_PrevSL.ribosomal.cut$ID <- "ribosomal"
+
+DF2.GO.photo.cut <- DF2.GO.photo[,c(5,21)]
+DF2.GO.photo.cut.DF_PrevSL.GO.photo.cut <- merge.data.frame(DF2.GO.photo.cut, DF_PrevSL.GO.photo.cut, by="Protein", all=F)
+DF2.GO.photo.cut.DF_PrevSL.GO.photo.cut$ID <- "GO.photo"
+
+DF2.PE.cut <- DF2.PE[,c(5,21)]
+DF2.PE.cut.DF_PrevSL.PE.cut <- merge.data.frame(DF2.PE.cut, DF_PrevSL.PE.cut, by="Protein", all=F)
+DF2.PE.cut.DF_PrevSL.PE.cut$ID <- "PE"
+
+DF2.PE.ribo.cut <- DF2.PE.ribo[,c(5,21)]
+DF2.PE.ribo.cut.DF_PrevSL.PE.ribo.cut <- merge.data.frame(DF2.PE.ribo.cut, DF_PrevSL.PE.ribo.cut, by="Protein", all=F)
+DF2.PE.ribo.cut.DF_PrevSL.PE.ribo.cut$ID <- "PE.ribo"
+
+DF2.cut.DF_PrevSL.cut.rbind.NE <- rbind(DF2.all.cut.DF_PrevSL.all.cut, DF2.ribosomal.cut.DF_PrevSL.ribosomal.cut, DF2.GO.photo.cut.DF_PrevSL.GO.photo.cut)
+DF2.cut.DF_PrevSL.cut.rbind.PE <- rbind(DF2.all.cut.DF_PrevSL.all.cut, DF2.PE.cut.DF_PrevSL.PE.cut, DF2.PE.ribo.cut.DF_PrevSL.PE.ribo.cut)
+
+DF2.cut.DF_PrevSL.cut.rbind.NE.lims <- DF2.cut.DF_PrevSL.cut.rbind.NE
+DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73 <- log2(DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73)
+DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp <- log2(DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp)
+DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73[DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73>1.0]<- 1.0
+DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73[DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.acs.b73< -1.0]<- -1.0
+DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp[DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp>1.0]<- 1.0
+DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp[DF2.cut.DF_PrevSL.cut.rbind.NE.lims$avg.bm.mp< -1.0]<- -1.0
+
+DF2.cut.DF_PrevSL.cut.rbind.PE.lims <- DF2.cut.DF_PrevSL.cut.rbind.PE
+DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73 <- log2(DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73)
+DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp <- log2(DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp)
+DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73[DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73>1.0]<- 1.0
+DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73[DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.acs.b73< -1.0]<- -1.0
+DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp[DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp>1.0]<- 1.0
+DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp[DF2.cut.DF_PrevSL.cut.rbind.PE.lims$avg.bm.mp< -1.0]<- -1.0
+
+ggplot(DF2.cut.DF_PrevSL.cut.rbind.PE.lims, mapping = aes(x=avg.acs.b73, y=avg.bm.mp, color=ID))+
+  geom_point(size=.5)+
+  theme_bw()+
+  scale_color_manual(values=c("grey80","blue", "red"))+
+  ylab("log2(BxM/MP)")+
+  xlab("log2(acs/B73)")+
+  geom_abline(slope = 1, color="grey50", size=.5)+
+  geom_vline(color="grey50", size=.5, xintercept = 0)+
+  geom_hline(color="grey50", size=.5, yintercept = 0)+
+  coord_fixed(expand = F)+
+  xlim(-1,1)+
+  ylim(-1,1)+
+  ggtitle("Repeat: Shared plastid-encoded proteins")
+ggsave("Repeat_Scatter_SharedPE.png")
+
+ggplot(DF2.cut.DF_PrevSL.cut.rbind.NE.lims, mapping = aes(x=avg.acs.b73, y=avg.bm.mp, color=ID))+
+  geom_point(size=.5)+
+  theme_bw()+
+  scale_color_manual(values=c("grey80","blue", "red"))+
+  ylab("log2(BxM/MP)")+
+  xlab("log2(acs/B73)")+
+  geom_abline(slope = 1, color="grey50", size=.5)+
+  geom_vline(color="grey50", size=.5, xintercept = 0)+
+  geom_hline(color="grey50", size=.5, yintercept = 0)+
+  coord_fixed(expand = F)+
+  xlim(-1,1)+
+  ylim(-1,1)+
+  ggtitle("Repeat: Shared nuclear-encoded proteins")
+ggsave("Repeat_Scatter_SharedNE.png")
+```
+
+
+
+
+# Distance matrices to analyze bio replicates
+## Build distance matrices
+```{r}
+#Build distance matrix of bio reps
+df_Repeat_NoDecoys_Biomart_epost_bioreps <- df_Repeat_NoDecoys_Biomart_epost
+df_Repeat_NoDecoys_Biomart_epost_bioreps <- df_Repeat_NoDecoys_Biomart_epost_bioreps[,c(3:12)]
+colnames(df_Repeat_NoDecoys_Biomart_epost_bioreps)<- c("acs.1", "acs.2", "acs.3", "acs.4", "acs.5", "B73.1", "B73.2", "B73.3", "B73.4", "B73.5")
+df_Repeat_NoDecoys_Biomart_epost_bioreps <- t(df_Repeat_NoDecoys_Biomart_epost_bioreps)
+dist_bioreps <- dist(df_Repeat_NoDecoys_Biomart_epost_bioreps, method = "euclidean")
+dist_bioreps
+```
+## Plot distance matrix 
+```{r}
+#Plot distance matrix - bio reps
+res.dist_bioreps <- factoextra::get_dist(df_Repeat_NoDecoys_Biomart_epost_bioreps, stand = F, method = "euclidian")
+factoextra::fviz_dist(res.dist_bioreps, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
+
+ggsave("bioreps_dist.png")
+```
+## build heirarchical clustering
+```{r}
+#build heirarchical clustering - bio reps
+hc_bioreps<- hclust(dist_bioreps, method = "ward.D2")
+hcd_bioreps <- as.dendrogram(hc_bioreps)
+plot(hcd_bioreps, type = "rectangle", ylab = "height")
+```
+
+## Build distance matrix of bio reps - plastid-encoded
+```{r}
+#Build distance matrix - bio reps
+df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid <- df_Repeat_NoDecoys_Biomart_epost
+df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid <- df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid[grep("NP_04",df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid$Protein),]
+df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid <- df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid[,c(3:12)]
+colnames(df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid)<- c("acs.1", "acs.2", "acs.3", "acs.4", "acs.5", "B73.1", "B73.2", "B73.3", "B73.4", "B73.5")
+df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid <- t(df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid)
+dist_bioreps_plastid <- dist(df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid, method = "euclidean")
+dist_bioreps_plastid
+```
+## Plot distance matrix - plastid-encoded
+```{r}
+#Plot distance matrix - bio reps
+res.dist_bioreps <- factoextra::get_dist(df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid, stand = F, method = "euclidian")
+factoextra::fviz_dist(res.dist_bioreps, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"), order = T)
+ggsave("bioreps_plastid_dist.png")
+```
+## build heirarchical clustering - plastid-encoded
+```{r}
+#build heirarchical clustering - bio reps
+hc_bioreps_plastid<- hclust(dist_bioreps_plastid, method = "ward.D2")
+hcd_bioreps_plastid <- as.dendrogram(hc_bioreps_plastid)
+plot(hcd_bioreps_plastid, type = "rectangle", ylab = "height")
+```
+### define GO:photosynthesis genes and GO:ribosome genes
+```{r define GO:photosynthesis genes and GO:ribosome genes}
+go.photosynthesis <- na.omit(gamer[(gamer$Term=="photosynthesis"),])
+accessions.go.photosynthesis <- go.photosynthesis$db_object_id
+
+go.ribosome <- na.omit(gamer[(gamer$Term=="ribosome"),])
+accessions.go.ribosome <- go.ribosome$db_object_id
+```
+
+
+
+
+## Build distance matrix of bio reps - GO:photosynthesis
+```{r}
+#Build distance matrix of bio reps
+df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo<- df_Repeat_NoDecoys_Biomart_epost
+df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo <- df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo[(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo$V4%in%accessions.go.photosynthesis),]
+df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo <- df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo[,c(3:12)]
+colnames(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo)<- c("acs.1", "acs.2", "acs.3", "acs.4", "acs.5", "B73.1", "B73.2", "B73.3", "B73.4", "B73.5")
+df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo <- t(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo)
+dist_bioreps_go.photo <- dist(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo, method = "euclidean")
+dist_bioreps_go.photo
+```
+
+## Plot distance matrix - GO:photosynthesis
+```{r}
+#Plot distance matrix - bio reps
+res.dist_bioreps <- factoextra::get_dist(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo, stand = F, method = "euclidian")
+factoextra::fviz_dist(res.dist_bioreps, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+ggsave("bioreps_nuclear_GO_photo_dist.png")
+```
+## build heirarchical clustering - GO:photosynthesis
+```{r}
+#build heirarchical clustering - bio reps
+hc_bioreps_go.photo<- hclust(dist_bioreps_go.photo)
+hcd_bioreps_go.photo <- as.dendrogram(hc_bioreps_go.photo)
+plot(hcd_bioreps_go.photo, type = "rectangle", ylab = "height")
+```
+
+## Build distance matrix of bio reps - "ribosomal protein"
+```{r}
+#Build distance matrix of bio reps
+df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome<- df_Repeat_NoDecoys_Biomart_epost
+df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome <- df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome[grep("ribosomal protein",df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome$Protein),]
+df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome <- df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome[,c(3:12)]
+colnames(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome)<- c("acs.1", "acs.2", "acs.3", "acs.4", "acs.5", "B73.1", "B73.2", "B73.3", "B73.4", "B73.5")
+df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome <- t(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome)
+dist_bioreps_go.ribosome <- dist(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome, method = "euclidean", diag=T, upper=T)
+dist_bioreps_go.ribosome
+```
+## Plot distance matrix - "ribosomal protein"
+```{r}
+#Plot distance matrix - bio reps
+res.dist_bioreps <- factoextra::get_dist(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome, stand = F, method = "euclidian")
+factoextra::fviz_dist(res.dist_bioreps, 
+   gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+ggsave("bioreps_nuclear_GO_ribosome_dist.png")
+```
+## build heirarchical clustering - "ribosomal protein"
+```{r} 
+#build heirarchical clustering - bio reps
+hc_bioreps_go.ribosome<- hclust(dist_bioreps_go.ribosome)
+hcd_bioreps_go.ribosome <- as.dendrogram(hc_bioreps_go.ribosome)
+plot(hcd_bioreps_go.ribosome, type = "rectangle", ylab = "height")
+```
+
+
+# heatmaps 
+```{r}
+library(RColorBrewer)
+```
+## build matrices
+```{r}
+dist_bioreps_go.ribosome.m <- as.matrix(dist_bioreps_go.ribosome)
+dist_bioreps_go.photo.m <- as.matrix(dist_bioreps_go.photo)
+dist_bioreps_plastid.m <- as.matrix(dist_bioreps_plastid)
+dist_bioreps.m <- as.matrix(dist_bioreps)
+```
+## heatmap:all
+```{r}
+heatmap(dist_bioreps.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+## heatmap:plastid-encoded
+```{r}
+heatmap(dist_bioreps_plastid.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+## heatmap:GO:photosynthesis
+```{r}
+heatmap(dist_bioreps_go.photo.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+## heatmap:ribosome
+```{r}
+heatmap(dist_bioreps_go.ribosome.m, col =colorRampPalette(brewer.pal(8, "Blues"))(25), symm = T)
+```
+
+
+# heatmaps of individual protein expression
+## heatmap:all
+```{r}
+df_Repeat_NoDecoys_Biomart_epost_bioreps.t <- t(df_Repeat_NoDecoys_Biomart_epost_bioreps)
+heatmap(df_Repeat_NoDecoys_Biomart_epost_bioreps.t)
+```
+## heatmap:plastid-encoded
+```{r}
+df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid.t <- t(df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid)
+heatmap(df_Repeat_NoDecoys_Biomart_epost_bioreps_plastid.t)
+```
+## heatmap:GO:photosynthesis
+```{r}
+df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo.t <- t(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo)
+heatmap(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.photo.t)
+```
+## heatmap:ribosome
+```{r}
+df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome.t <- t(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome)
+heatmap(df_Repeat_NoDecoys_Biomart_epost_bioreps_go.ribosome.t)
+```
+
+
+# PlotExp function
+```{r PlotExp function}
+PlotExp2 <- function(V4acc){
+b73 <- df_Repeat_NoDecoys_Biomart_epost[((as.character(df_Repeat_NoDecoys_Biomart_epost$V4))==V4acc), 3:5]
+mo17 <- df_Repeat_NoDecoys_Biomart_epost[((as.character(df_Repeat_NoDecoys_Biomart_epost$V4))==V4acc), 6:7]
+hyb <- df_Repeat_NoDecoys_Biomart_epost[((as.character(df_Repeat_NoDecoys_Biomart_epost$V4))==V4acc), 8:9]
+acs <- df_Repeat_NoDecoys_Biomart_epost[((as.character(df_Repeat_NoDecoys_Biomart_epost$V4))==V4acc), 10:12]
+all4 <- c(as.numeric(b73[1,]), as.numeric(mo17[1,]), as.numeric(hyb[1,]), as.numeric(acs[1,]))
+all4df <- data.frame(sample=(c("b73.1", "b73.2", "b73.3", "b73.4", "b73.5", "acs.1", "acs.2", "acs.3", "acs.4", "acs.5")), TMT=all4)
+all4df$sample <- factor(all4df$sample, levels = all4df$sample)
+ggplot(data=all4df, aes(x=sample, y=TMT, width=0.75)) + geom_bar(stat="identity", fill = c("blue3", "blue3", "blue3", "blue3", "blue3",  "green3", "green3", "green3", "green3", "green3")) + labs(title=V4acc)
+}
+```
+## Plotting genes
+```{r}
+PlotExp2("Zm00001d045479")
+```
+
+# Redox
+## Import data
+```{r}
+Redox <- read.csv("CSVs/B73-Mo17-BM-ACS26 TMT10 100319_redox.csv", stringsAsFactors = F)
+```
+```{r}
+Redox_PrevSL <- read.csv("CSVs/Seedling-Leaf-Cys-NEM-IAA-TMT6 050219.csv", stringsAsFactors = F)
+```
+```{r}
+colnames(Redox) <- c("nonCys.b73.1", "nonCys.b73.2", "nonCys.b73.3", "nonCys.mo17.1", "nonCys.mo17.2", "nonCys.bm.1", "nonCys.bm.2", "nonCys.acs.1", "nonCys.acs.2", "nonCys.acs.3", "fixedCys.b73.1", "fixedCys.b73.2", "fixedCys.b73.3", "fixedCys.mo17.1", "fixedCys.mo17.2", "fixedCys.bm.1", "fixedCys.bm.2", "fixedCys.acs.1", "fixedCys.acs.2", "fixedCys.acs.3","variableCys.b73.1", "variableCys.b73.2", "variableCys.b73.3", "variableCys.mo17.1", "variableCys.mo17.2", "variableCys.bm.1", "variableCys.bm.2", "variableCys.acs.1", "variableCys.acs.2", "variableCys.acs.3", "Peptide", "Group", "Score", "Accession", "Protein")
+```
+
+## Analyze redox data
+```{r}
+# Function to calculate row-geometric means of defined columns
+GeomeanSetCols <- function(df, cols){
+  x <- NULL
+  for(i in 1:nrow(df)){
+    v <- as.numeric(df[i, cols])
+    gm <- geoMean(v, na.rm = T)
+    x[i]<-gm
+  }
+  x
+}
+```
+
+```{r}
+Redox$nonCys.acs.1.nonCys.b73.1 <- Redox$nonCys.acs.1/Redox$nonCys.b73.1
+Redox$nonCys.acs.2.nonCys.b73.2 <- Redox$nonCys.acs.2/Redox$nonCys.b73.2
+Redox$nonCys.acs.3.nonCys.b73.3 <- Redox$nonCys.acs.3/Redox$nonCys.b73.3
+```
+```{r}
+Redox$variableCys.acs.1.variableCys.b73.1 <- Redox$variableCys.acs.1/Redox$variableCys.b73.1
+Redox$variableCys.acs.2.variableCys.b73.2 <- Redox$variableCys.acs.2/Redox$variableCys.b73.2
+Redox$variableCys.acs.3.variableCys.b73.3 <- Redox$variableCys.acs.3/Redox$variableCys.b73.3
+```
+```{r}
+Redox$fixedCys.acs.1.fixedCys.b73.1 <- Redox$fixedCys.acs.1/Redox$fixedCys.b73.1
+Redox$fixedCys.acs.2.fixedCys.b73.2 <- Redox$fixedCys.acs.2/Redox$fixedCys.b73.2
+Redox$fixedCys.acs.3.fixedCys.b73.3 <- Redox$fixedCys.acs.3/Redox$fixedCys.b73.3
+```
+```{r}
+#Remove proteins where there are no non-cys peptides
+Redox.WithNons <-Redox[!(Redox$nonCys.b73.1==0),]
+```
+
+## Make df with two variables: log2(var/non) and log2(fix/non)
+```{r}
+Redox.WithNons$variableCys.acs.1.variableCys.b73.1_nonCys.acs.1.nonCys.b73.1 <- log2(Redox.WithNons$variableCys.acs.1.variableCys.b73.1/Redox.WithNons$nonCys.acs.1.nonCys.b73.1)
+
+Redox.WithNons$variableCys.acs.2.variableCys.b73.2_nonCys.acs.2.nonCys.b73.2 <- log2(Redox.WithNons$variableCys.acs.2.variableCys.b73.2/Redox.WithNons$nonCys.acs.2.nonCys.b73.2)
+
+Redox.WithNons$variableCys.acs.3.variableCys.b73.3_nonCys.acs.3.nonCys.b73.3 <- log2(Redox.WithNons$variableCys.acs.3.variableCys.b73.3/Redox.WithNons$nonCys.acs.3.nonCys.b73.3)
+
+
+Redox.WithNons$fixedCys.acs.1.fixedCys.b73.1_nonCys.acs.1.nonCys.b73.1 <- log2(Redox.WithNons$fixedCys.acs.1.fixedCys.b73.1/Redox.WithNons$nonCys.acs.1.nonCys.b73.1)
+
+Redox.WithNons$fixedCys.acs.2.fixedCys.b73.2_nonCys.acs.2.nonCys.b73.2 <- log2(Redox.WithNons$fixedCys.acs.2.fixedCys.b73.2/Redox.WithNons$nonCys.acs.2.nonCys.b73.2)
+
+Redox.WithNons$fixedCys.acs.3.fixedCys.b73.3_nonCys.acs.3.nonCys.b73.3 <- log2(Redox.WithNons$fixedCys.acs.3.fixedCys.b73.3/Redox.WithNons$nonCys.acs.3.nonCys.b73.3)
+```
+```{r}
+Redox.WithNons$variableCys.acs.variableCys.b73_nonCys.acs.nonCys.b73.mean <- rowMeans(Redox.WithNons[,45:47])
+Redox.WithNons$fixedCys.acs.fixedCys.b73_nonCys.acs.nonCys.b73.mean <- rowMeans(Redox.WithNons[,48:50])
+```
+### Split df and melt to plot
+```{r}
+Redox.WithNons.VarNon <-Redox.WithNons[,c(34,45:47)]
+Redox.WithNons.VarNon.m <- melt(Redox.WithNons.VarNon)
+```
+```{r}
+Redox.WithNons.FixNon <-Redox.WithNons[,c(34,48:50)]
+Redox.WithNons.FixNon.m <- melt(Redox.WithNons.FixNon)
+```
+```{r}
+# merge melted dfs together
+Redox.WithNons.VarFixNon.m <- cbind(Redox.WithNons.VarNon.m, Redox.WithNons.FixNon.m[,3])
+colnames(Redox.WithNons.VarFixNon.m)  <- c("Accession", "variable", "Var", "Fix")
+# reorder
+Redox.WithNons.VarFixNon.m <- Redox.WithNons.VarFixNon.m[(order(Redox.WithNons.VarFixNon.m$Var)),]
+# melt
+Redox.WithNons.VarFixNon.m.m <- melt(Redox.WithNons.VarFixNon.m)
+colnames(Redox.WithNons.VarFixNon.m.m) <- c("Accession", "var1", "var2", "value")
+# make new column defining order for plotting
+Redox.WithNons.VarFixNon.m.m$order <- c((1:((nrow(Redox.WithNons.VarFixNon.m.m))/2)), (1:((nrow(Redox.WithNons.VarFixNon.m.m))/2)))
+```
+## make new df with Non, Var, and Fix raw values as three separate variables
+```{r}
+Redox.WithNons.NonCys <- Redox.WithNons[,c(34,36:38)]
+Redox.WithNons.NonCys.m <- melt(Redox.WithNons.NonCys)
+
+Redox.WithNons.VarCys <- Redox.WithNons[,c(34,39:41)]
+Redox.WithNons.VarCys.m <- melt(Redox.WithNons.VarCys)
+
+Redox.WithNons.FixCys <- Redox.WithNons[,c(34,42:44)]
+Redox.WithNons.FixCys.m <- melt(Redox.WithNons.FixCys)
+
+Redox.WithNons.NonVarFix <- cbind(Redox.WithNons.NonCys.m, Redox.WithNons.VarCys.m[,3], Redox.WithNons.FixCys.m[,3])
+colnames(Redox.WithNons.NonVarFix)  <- c("Accession", "variable","Non", "Var", "Fix")
+```
+### 3D plot
+```{r}
+library(plotly)
+library(htmlwidgets)
+```
+
+```{r}
+axx <- list(
+  nticks = 5,
+  range = c(0,3.5)
+)
+
+axy <- list(
+  nticks = 5,
+  range = c(0,3.5)
+)
+
+axz <- list(
+  nticks = 5,
+  range = c(0,3.5)
+)
+
+
+p <- plot_ly(x = ~x, y = ~y, z = ~z, type = 'mesh3d') %>%
+  layout(scene = list(xaxis=axx,yaxis=axy,zaxis=axz))
+```
+
+```{r}
+plot_ly(x=Redox.WithNons.NonVarFix$Non, y=Redox.WithNons.NonVarFix$Var, z=Redox.WithNons.NonVarFix$Fix, type="scatter3d", mode="markers", color=Redox.WithNons.NonVarFix$variable, size = 1, alpha = .5)%>% 
+    layout(scene=list(aspectmode='cube', xaxis=axx,yaxis=axy,zaxis=axz))
+```
+### 2D plot
+```{r}
+ggplot(data=Redox.WithNons.NonVarFix, mapping = aes(x=Non, y = Fix, color=variable))+
+  geom_point()+
+  xlim(0.5,3)+
+  ylim(0.5,3)
+```
+### density plot
+```{r}
+ggplot(data=Redox.WithNons.FixNon.m, mapping = aes(x=value, color=variable))+
+  geom_density()+
+  theme(legend.position = "bottom")
+```
+## Copy Redox data to analyze differently
+```{r}
+# Remove proteins with no non-cys peptides
+Redox.WithNons2<-Redox[!(Redox$nonCys.b73.1==0),]
+```
+```{r}
+# Calculate geometric means
+Redox.WithNons2$nonCys.b73.GM <- GeomeanSetCols(Redox.WithNons2, 1:3)
+Redox.WithNons2$nonCys.acs.GM <- GeomeanSetCols(Redox.WithNons2, 8:10)
+Redox.WithNons2$fixedCys.b73.GM <- GeomeanSetCols(Redox.WithNons2, 11:13)
+Redox.WithNons2$fixedCys.acs.GM <- GeomeanSetCols(Redox.WithNons2, 18:20)
+Redox.WithNons2$variableCys.b73.GM <- GeomeanSetCols(Redox.WithNons2, 21:23)
+Redox.WithNons2$variableCys.acs.GM <- GeomeanSetCols(Redox.WithNons2, 28:30)
+```
+```{r}
+# calculate ratios of fix/non, var/non, and fix/var
+Redox.WithNons2$fixedCys.acs.1_nonCys.acs.1 <- Redox.WithNons2$fixedCys.acs.1/Redox.WithNons2$nonCys.acs.1
+Redox.WithNons2$fixedCys.acs.2_nonCys.acs.2 <- Redox.WithNons2$fixedCys.acs.2/Redox.WithNons2$nonCys.acs.2
+Redox.WithNons2$fixedCys.acs.3_nonCys.acs.3 <- Redox.WithNons2$fixedCys.acs.3/Redox.WithNons2$nonCys.acs.3
+Redox.WithNons2$fixedCys.acs.GM_nonCys.acs.GM <- Redox.WithNons2$fixedCys.acs.GM/Redox.WithNons2$nonCys.acs.GM
+
+Redox.WithNons2$fixedCys.b73.1_nonCys.b73.1 <- Redox.WithNons2$fixedCys.b73.1/Redox.WithNons2$nonCys.b73.1
+Redox.WithNons2$fixedCys.b73.2_nonCys.b73.2 <- Redox.WithNons2$fixedCys.b73.2/Redox.WithNons2$nonCys.b73.2
+Redox.WithNons2$fixedCys.b73.3_nonCys.b73.3 <- Redox.WithNons2$fixedCys.b73.3/Redox.WithNons2$nonCys.b73.3
+Redox.WithNons2$fixedCys.b73.GM_nonCys.b73.GM <- Redox.WithNons2$fixedCys.b73.GM/Redox.WithNons2$nonCys.b73.GM
+
+Redox.WithNons2$variableCys.acs.1_nonCys.acs.1 <- Redox.WithNons2$variableCys.acs.1/Redox.WithNons2$nonCys.acs.1
+Redox.WithNons2$variableCys.acs.2_nonCys.acs.2 <- Redox.WithNons2$variableCys.acs.2/Redox.WithNons2$nonCys.acs.2
+Redox.WithNons2$variableCys.acs.3_nonCys.acs.3 <- Redox.WithNons2$variableCys.acs.3/Redox.WithNons2$nonCys.acs.3
+Redox.WithNons2$variableCys.acs.GM_nonCys.acs.GM <- Redox.WithNons2$variableCys.acs.GM/Redox.WithNons2$nonCys.acs.GM
+
+Redox.WithNons2$variableCys.b73.1_nonCys.b73.1 <- Redox.WithNons2$variableCys.b73.1/Redox.WithNons2$nonCys.b73.1
+Redox.WithNons2$variableCys.b73.2_nonCys.b73.2 <- Redox.WithNons2$variableCys.b73.2/Redox.WithNons2$nonCys.b73.2
+Redox.WithNons2$variableCys.b73.3_nonCys.b73.3 <- Redox.WithNons2$variableCys.b73.3/Redox.WithNons2$nonCys.b73.3
+Redox.WithNons2$variableCys.b73.GM_nonCys.b73.GM <- Redox.WithNons2$variableCys.b73.GM/Redox.WithNons2$nonCys.b73.GM
+
+Redox.WithNons2$fixedCys.acs.1_variableCys.acs.1 <- Redox.WithNons2$fixedCys.acs.1/Redox.WithNons2$variableCys.acs.1
+Redox.WithNons2$fixedCys.acs.2_variableCys.acs.2 <- Redox.WithNons2$fixedCys.acs.2/Redox.WithNons2$variableCys.acs.2
+Redox.WithNons2$fixedCys.acs.3_variableCys.acs.3 <- Redox.WithNons2$fixedCys.acs.3/Redox.WithNons2$variableCys.acs.3
+Redox.WithNons2$fixedCys.acs.GM_variableCys.acs.GM <- Redox.WithNons2$fixedCys.acs.GM/Redox.WithNons2$variableCys.acs.GM
+
+Redox.WithNons2$fixedCys.b73.1_variableCys.b73.1 <- Redox.WithNons2$fixedCys.b73.1/Redox.WithNons2$variableCys.b73.1
+Redox.WithNons2$fixedCys.b73.2_variableCys.b73.2 <- Redox.WithNons2$fixedCys.b73.2/Redox.WithNons2$variableCys.b73.2
+Redox.WithNons2$fixedCys.b73.3_variableCys.b73.3 <- Redox.WithNons2$fixedCys.b73.3/Redox.WithNons2$variableCys.b73.3
+Redox.WithNons2$fixedCys.b73.GM_variableCys.b73.GM <- Redox.WithNons2$fixedCys.b73.GM/Redox.WithNons2$variableCys.b73.GM
+```
+```{r}
+# define trimmed dfs
+Redox.WithNons2.fixed.acs <- Redox.WithNons2[,c(34,51:54)]
+Redox.WithNons2.fixed.b73 <- Redox.WithNons2[,c(34,55:58)]
+Redox.WithNons2.variable.acs <- Redox.WithNons2[,c(34,59:62)]
+Redox.WithNons2.variable.b73 <- Redox.WithNons2[,c(34,63:66)]
+Redox.WithNons2.fix.var.acs <- Redox.WithNons2[,c(34,67:70)]
+Redox.WithNons2.fix.var.b73 <- Redox.WithNons2[,c(34,71:74)]
+```
+```{r}
+# melt trimmed dfs
+Redox.WithNons2.fixed.acs.m <- melt(Redox.WithNons2.fixed.acs)
+Redox.WithNons2.fixed.b73.m <- melt(Redox.WithNons2.fixed.b73)
+Redox.WithNons2.variable.acs.m <- melt(Redox.WithNons2.variable.acs)
+Redox.WithNons2.variable.b73.m <- melt(Redox.WithNons2.variable.b73)
+Redox.WithNons2.fix.var.acs.m <- melt(Redox.WithNons2.fix.var.acs)
+Redox.WithNons2.fix.var.b73.m <- melt(Redox.WithNons2.fix.var.b73)
+```
+```{r}
+# cbind melted trimmed dfs
+Redox.WithNons2.fixed.m <- cbind(Redox.WithNons2.fixed.acs.m, Redox.WithNons2.fixed.b73.m[,3])
+Redox.WithNons2.variable.m <- cbind(Redox.WithNons2.variable.acs.m, Redox.WithNons2.variable.b73.m[,3])
+Redox.WithNons2.fix.var.m <- cbind(Redox.WithNons2.fix.var.acs.m, Redox.WithNons2.fix.var.b73.m[,3])
+# fix names
+colnames(Redox.WithNons2.fixed.m) <- c("Accession", "ratio", "acs", "B73")
+colnames(Redox.WithNons2.variable.m) <- c("Accession", "ratio", "acs", "B73")
+colnames(Redox.WithNons2.fix.var.m) <- c("Accession", "ratio", "acs", "B73")
+```
+```{r}
+# trim to only geometric means
+Redox.WithNons2.fixed.m.GM <- Redox.WithNons2.fixed.m[(grep("GM",Redox.WithNons2.fixed.m$ratio)),]
+Redox.WithNons2.variable.m.GM <- Redox.WithNons2.variable.m[(grep("GM",Redox.WithNons2.variable.m$ratio)),]
+# melt
+Redox.WithNons2.fixed.m.GM.m <- melt(Redox.WithNons2.fixed.m.GM)
+Redox.WithNons2.variable.m.GM.m <- melt(Redox.WithNons2.variable.m.GM)
+```
+### Plot density curves
+```{r}
+ggplot(data=Redox.WithNons2.fixed.m.GM.m, mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)+
+  xlab("log2(oxidized/non)")
+ggsave("Redox.WithNons.OX.Non.acs.b73.density.png", width = 8, height = 2)
+```
+```{r}
+ggplot(data=Redox.WithNons2.variable.m.GM.m, mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)
+xlab("log2(reduced/non)")
+ggsave("Redox.WithNons.Red.Non.acs.b73.density.png", width = 8, height = 2)
+```
+### Plot scatter
+```{r}
+ggplot(data=Redox.WithNons2.fix.var.m[-grep("GM", Redox.WithNons2.fix.var.m$ratio),], mapping = aes(x=B73, y = acs, color=ratio))+
+  geom_point(size=.7)+
+  geom_smooth(method = "lm", se = FALSE, linetype="dashed", size=.5)+
+  theme_bw()+
+ # theme(legend.position = "none")+
+  ylab("acs2/6 oxidized/reduced")+
+  xlab("B73 oxidized/reduced")+
+  geom_abline(slope = 1, color="grey", size=.5)+
+  coord_fixed(expand = F)+
+  xlim(0,270)+
+  ylim(0,270)
+ggsave("fix.var_B73.acs.png")
+```
+```{r}
+ggplot(data=Redox.WithNons2.variable.m[-grep("GM", Redox.WithNons2.variable.m$ratio),], mapping = aes(x=B73, y = acs, color=ratio))+
+  geom_point(size=.7)+
+  geom_smooth(method = "lm", se = FALSE, linetype="dashed", size=.5)+
+  theme_bw()+
+#  theme(legend.position = "none")+
+  ylab("acs2/6 reduced/non")+
+  xlab("B73 reduced/non")+
+  geom_abline(slope = 1, color="grey", size=.5)+
+  xlim(0,11)+
+  ylim(0,11)+
+  coord_fixed()
+ggsave("Var.Non_B73.acs.png")
+```
+```{r}
+ggplot(data=Redox.WithNons2.fixed.m[-grep("GM", Redox.WithNons2.fixed.m$ratio),], mapping = aes(x=B73, y = acs, color=ratio))+
+  geom_point(size=.7)+
+  geom_smooth(method = "lm", se = FALSE, linetype="dashed", size=.5)+
+  theme_bw()+
+#  theme(legend.position = "none")+
+  ylab("acs2/6 oxidized/non")+
+  xlab("B73 oxidized/non")+
+  xlim(0,7)+
+  ylim(0,7)+
+  geom_abline(slope = 1, color="grey", size=.5)+
+  coord_fixed()
+#ggsave("Fix.Non_B73.acs.png")
+```
+
+## Previous Seedling Leaf Redox
+### trim and analyze data
+```{r}
+# trim to columns of interest (summed from multiple runs)
+Redox_PrevSL.t <- Redox_PrevSL[,c(40,42:59)]
+# remove proteins without non-Cys peptides
+Redox_PrevSL.t.WithNons<-Redox_PrevSL.t[!(Redox_PrevSL.t$Non.Cys.B73.1==0),]
+```
+
+```{r}
+# create hypotheitical mid-parent values
+Redox_PrevSL.t.WithNons$Non.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons[,c(2,4)])
+Redox_PrevSL.t.WithNons$Non.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons[,c(3,5)])
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons[,c(8,10)])
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons[,c(9,11)])
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons[,c(14,16)])
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons[,c(15,17)])
+```
+
+```{r}
+# calculate geometric means
+Redox_PrevSL.t.WithNons$Non.Cys.B73.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 2:3)
+Redox_PrevSL.t.WithNons$Non.Cys.Mo17.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 4:5)
+Redox_PrevSL.t.WithNons$Non.Cys.BM.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 6:7)
+Redox_PrevSL.t.WithNons$Non.Cys.MP.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 20:21)
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 8:9)
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 10:11)
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 12:13)
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 22:23)
+Redox_PrevSL.t.WithNons$Reduced.Cys.B73.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 14:15)
+Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 16:17)
+Redox_PrevSL.t.WithNons$Reduced.Cys.BM.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 18:19)
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.GM <- GeomeanSetCols(Redox_PrevSL.t.WithNons, 24:25)
+```
+```{r}
+# calculate ratios of oxidized/non-cys
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.1.Non.Cys.B73.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.1/Redox_PrevSL.t.WithNons$Non.Cys.B73.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.2.Non.Cys.B73.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.2/Redox_PrevSL.t.WithNons$Non.Cys.B73.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM.Non.Cys.B73.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM/Redox_PrevSL.t.WithNons$Non.Cys.B73.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.1.Non.Cys.Mo17.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.1/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.2.Non.Cys.Mo17.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.2/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM.Non.Cys.Mo17.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.1.Non.Cys.BM.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.1/Redox_PrevSL.t.WithNons$Non.Cys.BM.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.2.Non.Cys.BM.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.2/Redox_PrevSL.t.WithNons$Non.Cys.BM.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM.Non.Cys.BM.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM/Redox_PrevSL.t.WithNons$Non.Cys.BM.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.1.Non.Cys.MP.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.1/Redox_PrevSL.t.WithNons$Non.Cys.MP.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.2.Non.Cys.MP.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.2/Redox_PrevSL.t.WithNons$Non.Cys.MP.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM.Non.Cys.MP.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM/Redox_PrevSL.t.WithNons$Non.Cys.MP.GM
+```
+```{r}
+# calculate ratios of reduced/non-cys
+Redox_PrevSL.t.WithNons$Reduced.Cys.B73.1.Non.Cys.B73.1 <- Redox_PrevSL.t.WithNons$Reduced.Cys.B73.1/Redox_PrevSL.t.WithNons$Non.Cys.B73.1
+Redox_PrevSL.t.WithNons$Reduced.Cys.B73.2.Non.Cys.B73.2 <- Redox_PrevSL.t.WithNons$Reduced.Cys.B73.2/Redox_PrevSL.t.WithNons$Non.Cys.B73.2
+Redox_PrevSL.t.WithNons$Reduced.Cys.B73.GM.Non.Cys.B73.GM <- Redox_PrevSL.t.WithNons$Reduced.Cys.B73.GM/Redox_PrevSL.t.WithNons$Non.Cys.B73.GM
+
+Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.1.Non.Cys.Mo17.1 <- Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.1/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.1
+Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.2.Non.Cys.Mo17.2 <- Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.2/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.2
+Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.GM.Non.Cys.Mo17.GM <- Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.GM/Redox_PrevSL.t.WithNons$Non.Cys.Mo17.GM
+
+Redox_PrevSL.t.WithNons$Reduced.Cys.BM.1.Non.Cys.BM.1 <- Redox_PrevSL.t.WithNons$Reduced.Cys.BM.1/Redox_PrevSL.t.WithNons$Non.Cys.BM.1
+Redox_PrevSL.t.WithNons$Reduced.Cys.BM.2.Non.Cys.BM.2 <- Redox_PrevSL.t.WithNons$Reduced.Cys.BM.2/Redox_PrevSL.t.WithNons$Non.Cys.BM.2
+Redox_PrevSL.t.WithNons$Reduced.Cys.BM.GM.Non.Cys.BM.GM <- Redox_PrevSL.t.WithNons$Reduced.Cys.BM.GM/Redox_PrevSL.t.WithNons$Non.Cys.BM.GM
+
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.1.Non.Cys.MP.1 <- Redox_PrevSL.t.WithNons$Reduced.Cys.MP.1/Redox_PrevSL.t.WithNons$Non.Cys.MP.1
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.2.Non.Cys.MP.2 <- Redox_PrevSL.t.WithNons$Reduced.Cys.MP.2/Redox_PrevSL.t.WithNons$Non.Cys.MP.2
+Redox_PrevSL.t.WithNons$Reduced.Cys.MP.GM.Non.Cys.MP.GM <- Redox_PrevSL.t.WithNons$Reduced.Cys.MP.GM/Redox_PrevSL.t.WithNons$Non.Cys.MP.GM
+```
+```{r}
+# calculate ratios of oxidized/nreduced
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.1.Reduced.Cys.B73.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.1/Redox_PrevSL.t.WithNons$Reduced.Cys.B73.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.2.Reduced.Cys.B73.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.2/Redox_PrevSL.t.WithNons$Reduced.Cys.B73.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM.Reduced.Cys.B73.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.B73.GM/Redox_PrevSL.t.WithNons$Reduced.Cys.B73.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.1.Reduced.Cys.Mo17.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.1/Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.2.Reduced.Cys.Mo17.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.2/Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM.Reduced.Cys.Mo17.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.Mo17.GM/Redox_PrevSL.t.WithNons$Reduced.Cys.Mo17.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.1.Reduced.Cys.BM.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.1/Redox_PrevSL.t.WithNons$Reduced.Cys.BM.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.2.Reduced.Cys.BM.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.2/Redox_PrevSL.t.WithNons$Reduced.Cys.BM.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM.Reduced.Cys.BM.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.BM.GM/Redox_PrevSL.t.WithNons$Reduced.Cys.BM.GM
+
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.1.Reduced.Cys.MP.1 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.1/Redox_PrevSL.t.WithNons$Reduced.Cys.MP.1
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.2.Reduced.Cys.MP.2 <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.2/Redox_PrevSL.t.WithNons$Reduced.Cys.MP.2
+Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM.Reduced.Cys.MP.GM <- Redox_PrevSL.t.WithNons$Oxidized.Cys.MP.GM/Redox_PrevSL.t.WithNons$Reduced.Cys.MP.GM
+```
+```{r}
+#define split dfs
+Redox_PrevSL.t.WithNons.Ox.Non.B73 <- Redox_PrevSL.t.WithNons[,c(1,38:40)]
+Redox_PrevSL.t.WithNons.Ox.Non.Mo17 <- Redox_PrevSL.t.WithNons[,c(1,41:43)]
+Redox_PrevSL.t.WithNons.Ox.Non.BM <- Redox_PrevSL.t.WithNons[,c(1,44:46)]
+Redox_PrevSL.t.WithNons.Ox.Non.MP <- Redox_PrevSL.t.WithNons[,c(1,47:49)]
+
+Redox_PrevSL.t.WithNons.Red.Non.B73 <- Redox_PrevSL.t.WithNons[,c(1,50:52)]
+Redox_PrevSL.t.WithNons.Red.Non.Mo17 <- Redox_PrevSL.t.WithNons[,c(1,53:55)]
+Redox_PrevSL.t.WithNons.Red.Non.BM <- Redox_PrevSL.t.WithNons[,c(1,56:58)]
+Redox_PrevSL.t.WithNons.Red.Non.MP <- Redox_PrevSL.t.WithNons[,c(1,59:61)]
+
+Redox_PrevSL.t.WithNons.Ox.Red.B73 <- Redox_PrevSL.t.WithNons[,c(1,62:64)]
+Redox_PrevSL.t.WithNons.Ox.Red.Mo17 <- Redox_PrevSL.t.WithNons[,c(1,65:67)]
+Redox_PrevSL.t.WithNons.Ox.Red.BM <- Redox_PrevSL.t.WithNons[,c(1,68:70)]
+Redox_PrevSL.t.WithNons.Ox.Red.MP <- Redox_PrevSL.t.WithNons[,c(1,71:73)]
+```
+
+```{r}
+#melt dfs
+Redox_PrevSL.t.WithNons.Ox.Non.B73.m <- melt(Redox_PrevSL.t.WithNons.Ox.Non.B73)
+Redox_PrevSL.t.WithNons.Ox.Non.Mo17.m <- melt(Redox_PrevSL.t.WithNons.Ox.Non.Mo17)
+Redox_PrevSL.t.WithNons.Ox.Non.BM.m <- melt(Redox_PrevSL.t.WithNons.Ox.Non.BM)
+Redox_PrevSL.t.WithNons.Ox.Non.MP.m <- melt(Redox_PrevSL.t.WithNons.Ox.Non.MP)
+
+Redox_PrevSL.t.WithNons.Red.Non.B73.m <- melt(Redox_PrevSL.t.WithNons.Red.Non.B73)
+Redox_PrevSL.t.WithNons.Red.Non.Mo17.m <- melt(Redox_PrevSL.t.WithNons.Red.Non.Mo17)
+Redox_PrevSL.t.WithNons.Red.Non.BM.m <- melt(Redox_PrevSL.t.WithNons.Red.Non.BM)
+Redox_PrevSL.t.WithNons.Red.Non.MP.m <- melt(Redox_PrevSL.t.WithNons.Red.Non.MP)
+
+Redox_PrevSL.t.WithNons.Ox.Red.B73.m <- melt(Redox_PrevSL.t.WithNons.Ox.Red.B73)
+Redox_PrevSL.t.WithNons.Ox.Red.Mo17.m <- melt(Redox_PrevSL.t.WithNons.Ox.Red.Mo17)
+Redox_PrevSL.t.WithNons.Ox.Red.BM.m <- melt(Redox_PrevSL.t.WithNons.Ox.Red.BM)
+Redox_PrevSL.t.WithNons.Ox.Red.MP.m <- melt(Redox_PrevSL.t.WithNons.Ox.Red.MP)
+```
+```{r}
+#merge melted dfs back together
+Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m <- cbind(Redox_PrevSL.t.WithNons.Ox.Non.B73.m, Redox_PrevSL.t.WithNons.Ox.Non.Mo17.m[,3], Redox_PrevSL.t.WithNons.Ox.Non.BM.m[,3], Redox_PrevSL.t.WithNons.Ox.Non.MP.m[,3])
+Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m <- cbind(Redox_PrevSL.t.WithNons.Red.Non.B73.m, Redox_PrevSL.t.WithNons.Red.Non.Mo17.m[,3], Redox_PrevSL.t.WithNons.Red.Non.BM.m[,3], Redox_PrevSL.t.WithNons.Red.Non.MP.m[,3])
+Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m <- cbind(Redox_PrevSL.t.WithNons.Ox.Red.B73.m, Redox_PrevSL.t.WithNons.Ox.Red.Mo17.m[,3], Redox_PrevSL.t.WithNons.Ox.Red.BM.m[,3], Redox_PrevSL.t.WithNons.Ox.Red.MP.m[,3])
+colnames(Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m) <- c("Accession", "ratio", "B73", "Mo17", "BM", "MP")
+colnames(Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m) <- c("Accession", "ratio", "B73", "Mo17", "BM", "MP")
+colnames(Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m) <- c("Accession", "ratio", "B73", "Mo17", "BM", "MP")
+```
+
+```{r}
+#re-define ratio column to simpler terms
+Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m$ratio<- c(rep("rep1", 790), rep("rep2", 790), rep("GM", 790))
+Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m$ratio<- c(rep("rep1", 790), rep("rep2", 790), rep("GM", 790))
+Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m$ratio<- c(rep("rep1", 790), rep("rep2", 790), rep("GM", 790))
+```
+### Plotting
+```{r}
+#create output dir for plots
+dir.create("Redox_PrevSL.t.WithNons.Plots")
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m$ratio)),], mapping = aes(x=(MP), y = (BM), color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE, size=.4)+
+  theme_bw()+
+  theme(legend.position = "bottom")+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  xlab("Mid-parent oxidized/non")+
+  ylab("BxM oxidized/non")+
+  geom_abline(slope = 1, color="grey", size=.5)+
+  xlim(0,70)+
+  ylim(0,70)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Ox.Non.MP.BM.png", width = 4.5)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m$ratio)),], mapping = aes(x=B73, y = Mo17, color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE, size=.4)+
+  theme_bw()+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  ylab("Mo17 oxidized/non")+
+  xlab("B73 oxidized/non")+
+  geom_abline(slope = 1, color="grey", size=.5)+
+  xlim(0,65)+
+  ylim(0,65)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Ox.Non.B73.Mo17.png", width = 4.5)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m$ratio)),], mapping = aes(x=(MP), y=(BM), color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE, size=.4)+
+  theme_bw()+
+  theme(legend.position = "bottom")+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  xlab("Mid-parent reduced/non")+
+  ylab("BxM reduced/non")+
+  geom_abline(slope = 1, color="grey", size=.5)+
+  xlim(0,150)+
+  ylim(0,150)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Red.Non.BM.MP.png", width = 4.5)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m$ratio)),], mapping = aes(x=B73, y = Mo17, color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE,size=.4)+
+  theme_bw()+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  ylab("Mo17 reduced/non)")+
+  xlab("B73 reduced/non")+
+  geom_abline(slope = 1, color="black", alpha=0.4, size=.5)+
+  xlim(0,180)+
+  ylim(0,180)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Red.Non.B73.Mo17.png", width = 4.5)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m$ratio)),], mapping = aes(x=B73, y = Mo17, color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE, size=.4)+
+  theme_bw()+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  ylab("Mo17 oxidized/red")+
+  xlab("B73 oxidized/red")+
+  geom_abline(slope = 1, color="black", alpha=0.4, size=.5)+
+  xlim(0,4500)+
+  ylim(0,4500)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Ox.Red.B73.Mo17.png", width = 4.5)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m[-(grep("GM",Redox_PrevSL.t.WithNons.Ox.Red.B73.Mo17.m$ratio)),], mapping = aes(x=(MP), y = (BM), color=ratio))+
+  geom_point(size=.8)+
+  geom_smooth(method = "lm", se = FALSE, size=.4)+
+  theme_bw()+ 
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"), legend.position = "bottom")+
+  xlab("Mid-Parent oxidized/red")+
+  ylab("BxM oxidized/red")+
+  geom_abline(slope = 1, color="grey", size=.5)+
+  xlim(0,5000)+
+  ylim(0,5000)+
+  coord_fixed(expand = F)
+ggsave("Redox_PrevSL.t.WithNons.Plots/Ox.Red.MP.BM.png", width = 4.5)
+```
+
+
+```{r}
+# Trim to just geometric mean values to plot density curves
+Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM <- Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m[(grep("GM",Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m$ratio)),]
+Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM.m <- melt(Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM)
+
+Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM <- Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m[(grep("GM",Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m$ratio)),]
+Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM.m <- melt(Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM)
+```
+
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM.m[grep("BM|MP",Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM.m$variable),], mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)+
+xlab("log2(reduced/non)")
+ggsave("Redox_PrevSL.t.WithNons.Red.Non.BM.MP.density.png", width = 8, height = 2)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM.m[-grep("BM|MP",Redox_PrevSL.t.WithNons.Red.Non.B73.Mo17.m.GM.m$variable),], mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)+
+xlab("log2(reduced/non)")
+ggsave("Redox_PrevSL.t.WithNons.Red.Non.b73.mo17.density.png", width = 8, height = 2)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM.m[grep("BM|MP",Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM.m$variable),], mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)+
+  xlab("log2(oxidized/non)")
+ggsave("Redox_PrevSL.t.WithNons.Ox.Non.BM.MP.density.png", width = 8, height = 2)
+```
+```{r}
+ggplot(data=Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM.m[-grep("BM|MP",Redox_PrevSL.t.WithNons.Ox.Non.B73.Mo17.m.GM.m$variable),], mapping = aes(x=log2(value), fill=variable))+
+  geom_density(alpha=0.4)+
+  xlab("log2(oxidized/non)")
+ggsave("Redox_PrevSL.t.WithNons.Ox.Non.b73.mo17.density.png", width = 8, height = 2)
+```
+
+### make new previous sl redox df to analyze differently
+```{r}
+# remove proteins without non-cys peptides
+Redox_PrevSL.t.WithNons2<-Redox_PrevSL.t[!(Redox_PrevSL.t$Non.Cys.B73.1==0),]
+```
+```{r}
+# create hypothetical mid-parent
+Redox_PrevSL.t.WithNons2$Non.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(2,4)])
+Redox_PrevSL.t.WithNons2$Non.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(3,5)])
+Redox_PrevSL.t.WithNons2$Oxidized.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(8,10)])
+Redox_PrevSL.t.WithNons2$Oxidized.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(9,11)])
+Redox_PrevSL.t.WithNons2$Reduced.Cys.MP.1 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(14,16)])
+Redox_PrevSL.t.WithNons2$Reduced.Cys.MP.2 <- rowMeans(Redox_PrevSL.t.WithNons2[,c(15,17)])
+```
+```{r}
+#calculate log2(sample1/sample2)
+Redox_PrevSL.t.WithNons2$l2.Non.Cys.B73.1.Non.Cys.Mo17.1 <- log2(Redox_PrevSL.t.WithNons2$Non.Cys.B73.1/Redox_PrevSL.t.WithNons2$Non.Cys.Mo17.1)
+Redox_PrevSL.t.WithNons2$l2.Non.Cys.B73.2.Non.Cys.Mo17.2 <- log2(Redox_PrevSL.t.WithNons2$Non.Cys.B73.2/Redox_PrevSL.t.WithNons2$Non.Cys.Mo17.2)
+
+Redox_PrevSL.t.WithNons2$l2.Oxidized.Cys.B73.1.Oxidized.Cys.Mo17.1 <- log2(Redox_PrevSL.t.WithNons2$Oxidized.Cys.B73.1/Redox_PrevSL.t.WithNons2$Oxidized.Cys.Mo17.1)
+Redox_PrevSL.t.WithNons2$l2.Oxidized.Cys.B73.2.Oxidized.Cys.Mo17.2 <- log2(Redox_PrevSL.t.WithNons2$Oxidized.Cys.B73.2/Redox_PrevSL.t.WithNons2$Oxidized.Cys.Mo17.2)
+
+Redox_PrevSL.t.WithNons2$l2.Reduced.Cys.B73.1.Reduced.Cys.Mo17.1 <- log2(Redox_PrevSL.t.WithNons2$Reduced.Cys.B73.1/Redox_PrevSL.t.WithNons2$Reduced.Cys.Mo17.1)
+Redox_PrevSL.t.WithNons2$l2.Reduced.Cys.B73.2.Reduced.Cys.Mo17.2 <- log2(Redox_PrevSL.t.WithNons2$Reduced.Cys.B73.2/Redox_PrevSL.t.WithNons2$Reduced.Cys.Mo17.2)
+
+Redox_PrevSL.t.WithNons2$l2.Non.Cys.BM.1.Non.Cys.MP.1 <- log2(Redox_PrevSL.t.WithNons2$Non.Cys.BM.1/Redox_PrevSL.t.WithNons2$Non.Cys.MP.1)
+Redox_PrevSL.t.WithNons2$l2.Non.Cys.BM.2.Non.Cys.MP.2 <- log2(Redox_PrevSL.t.WithNons2$Non.Cys.BM.2/Redox_PrevSL.t.WithNons2$Non.Cys.MP.2)
+
+Redox_PrevSL.t.WithNons2$l2.Oxidized.Cys.BM.1.Oxidized.Cys.MP.1 <- log2(Redox_PrevSL.t.WithNons2$Oxidized.Cys.BM.1/Redox_PrevSL.t.WithNons2$Oxidized.Cys.MP.1)
+Redox_PrevSL.t.WithNons2$l2.Oxidized.Cys.BM.2.Oxidized.Cys.MP.2 <- log2(Redox_PrevSL.t.WithNons2$Oxidized.Cys.BM.2/Redox_PrevSL.t.WithNons2$Oxidized.Cys.MP.2)
+
+Redox_PrevSL.t.WithNons2$l2.Reduced.Cys.BM.1.Reduced.Cys.MP.1 <- log2(Redox_PrevSL.t.WithNons2$Reduced.Cys.BM.1/Redox_PrevSL.t.WithNons2$Reduced.Cys.MP.1)
+Redox_PrevSL.t.WithNons2$l2.Reduced.Cys.BM.2.Reduced.Cys.MP.2 <- log2(Redox_PrevSL.t.WithNons2$Reduced.Cys.BM.2/Redox_PrevSL.t.WithNons2$Reduced.Cys.MP.2)
+```
+
+```{r}
+#melt and cbind
+Redox_PrevSL.t.WithNons2.m <- cbind(melt(Redox_PrevSL.t.WithNons2[,c(1,26,27)]), (melt(Redox_PrevSL.t.WithNons2[,c(1,28,29)]))[,3], (melt(Redox_PrevSL.t.WithNons2[,c(1,30,31)]))[,3], (melt(Redox_PrevSL.t.WithNons2[,c(1,32,33)]))[,3], (melt(Redox_PrevSL.t.WithNons2[,c(1,34,35)]))[,3], (melt(Redox_PrevSL.t.WithNons2[,c(1,36,37)]))[,3])
+#fix colnames
+colnames(Redox_PrevSL.t.WithNons2.m) <- c("Accession","ratio", "log2(B73non/Mo17non)", "log2(B73ox/Mo17ox)", "log2(B73red/Mo17red)", "log2(BMnon/MPnon)", "log2(BMox/MPox)", "log2(BMred/MPred)")
+#re-define ratio col to simpler terms for plots
+Redox_PrevSL.t.WithNons2.m$ratio <- c(rep("B73.1/Mo17.1", 790), rep("B73.2/Mo17.2", 790))
+```
+#### Plot
+```{r}
+# plotting function, input Redox_PrevSL.t.WithNons2.m$X and Redox_PrevSL.t.WithNons2.m$Y. Output to folder
+Plot_Redox_PrevSL.t.WithNons2.m <- function(X,Y){
+  dir.create("Plot_Redox_PrevSL.t.WithNons2.m")
+  setwd("Plot_Redox_PrevSL.t.WithNons2.m")
+  nameX <- deparse(substitute(X))
+  nameY <- deparse(substitute(Y))
+  nameX2 <- substr(nameX, start = 29, stop=((nchar(nameX))-1))
+  nameY2 <- substr(nameY, start = 29, stop=((nchar(nameY))-1))
+  nameX3 <- str_replace_all(nameX2, "[:punct:]", "_")
+  nameY3 <- str_replace_all(nameY2, "[:punct:]", "_")
+ggplot(data=Redox_PrevSL.t.WithNons2.m, mapping = aes(x=X, y = Y, color=ratio))+
+  geom_point(size=.75, alpha=0.4)+
+  theme_light()+
+  xlab(nameX2)+
+  ylab(nameY2)+
+  scale_x_continuous(limits=c(min(X,Y), max(X,Y))) +
+  scale_y_continuous(limits=c(min(X,Y), max(X,Y))) +
+  theme(aspect.ratio=1)+
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))+
+  theme(legend.position = "bottom")+
+  geom_abline(slope = 0, color="darkgrey", size=.5)+
+  geom_abline(slope = 1, color="grey50", size=.5, linetype="dashed")+
+  geom_vline(xintercept = 0, color="darkgrey", size=.5)
+ggsave(paste0(nameX3, ".", nameY3, ".png"))
+}
+```
+```{r}
+Plot_Redox_PrevSL.t.WithNons2.m(Redox_PrevSL.t.WithNons2.m$`log2(BMox/MPox)`, Redox_PrevSL.t.WithNons2.m$`log2(BMred/MPred)`)
+```
+
+
+
+# Plastid-encoded proteins
+```{r}
+PE <- read.csv("ACS_Plastid.csv", stringsAsFactors = F)
+```
+```{r}
+colnames(PE)
+```
+
+```{r}
+avgCV<-function(x){
+  B73CV<-(sd(x[1:3])/mean(x[1:3]))*100
+  Mo17CV<-(sd(x[4:5])/mean(x[4:5]))*100
+  BxMCV<-(sd(x[6:7])/mean(x[6:7]))*100
+  acsCV<-(sd(x[8:10])/mean(x[8:10]))*100
+  CV<--mean(c(B73CV, Mo17CV, BxMCV, acsCV))
+  CV
+}
+```
+```{r}
+PE.CV<-apply(PE[,2:11], 1, function(x) avgCV(x))
+names(PE.CV)<-PE[,1]
+```
+```{r}
+FC.bm.mp<-function(x){
+  #get mean of B73
+  B73Mean<-mean(x[1:3])
+  #get mean of Mo17
+  Mo17Mean<-mean(x[4:5])
+  #get mean of BxM
+  BxMMean<-mean(x[6:7])
+  #get midparent mean
+  MP<-mean(c(B73Mean, Mo17Mean))
+  #divide BxM by midparent mean
+  ret<-log(BxMMean/MP, base=2)
+  #return fold vector, with GI# as names
+  return(ret)
+}
+```
+```{r}
+FC.acs.b73<-function(x){
+  #get mean of B73
+  B73Mean<-mean(x[1:3])
+  #get mean of acs
+  acsMean<-mean(x[8:10])
+  ret<-log(acsMean/B73Mean, base=2)
+  #return fold vector, with GI# as names
+  return(ret)
+}
+```
+```{r}
+PE.FC.bm.mp <- apply(PE[,2:11], 1, function(x) FC.bm.mp(x))
+PE.FC.acs.b73 <- apply(PE[,2:11], 1, function(x) FC.acs.b73(x))
+```
+```{r}
+PE.FC.bm.mp.CV <- data.frame(cbind(PE.FC.bm.mp, PE.CV))
+PE.FC.acs.b73.CV <- data.frame(cbind(PE.FC.acs.b73, PE.CV))
+```
+```{r}
+colnames(PE.FC.bm.mp.CV) <- c("fold", "CV")
+colnames(PE.FC.acs.b73.CV) <- c("fold", "CV")
+```
+```{r}
+PE.df <- cbind(PE.FC.bm.mp.CV,PE.FC.acs.b73.CV)
+```
+```{r}
+colnames(PE.df) <- c("bm.mp.fold", "bm.mp.CV", "acs.b73.fold", "acs.b73.CV")
+```
+```{r}
+PE.df$Protein <- rownames(PE.df)
+```
+```{r}
+PE.df.m <- melt(PE.df)
+```
+
+
+```{r}
+library(cowplot)
+```
+
+```{r}
+ggCVVolcano(PE.FC.acs.b73.CV)
+```
+
+```{r}
+ggCVVolcano<-function(foldPvalDF, geneList=NULL, categories=NULL, title=NULL, zoom=c(2.5, -75)){
+  #saturate down to max fold
+  foldPvalDF[which(foldPvalDF[,"fold"]>zoom[1]),"fold"]<-zoom[1]
+  foldPvalDF[which(foldPvalDF[,"fold"]<(-zoom[1])),"fold"]<--zoom[1]
+  #saturate down to max CV
+  foldPvalDF[which(foldPvalDF[,"CV"]<(-75)),"CV"]<--75
+  #divide genes by membership in special list(s), if necessary
+  pointShape<-1
+  if(length(geneList)<1000&length(geneList)>0){pointShape<-19}
+  if(length(geneList)>0){
+    foldPvalDF<-foldPvalDF[which(foldPvalDF[,1]%in%geneList),]
+  }
+  #generate y and x axis limits for plots
+    xlims<-c(-zoom[1], zoom[1])
+    ylims<-c(0, zoom[2])
+  #if more than one category, create factor
+  if(length(categories)>0){
+    foldPvalDF<-cbind(foldPvalDF, category = rep("Other", times=nrow(foldPvalDF)))
+    #loop across categories, filling in values
+    for(i in 1:length(categories)){
+      foldPvalDF[which(foldPvalDF[,1]%in%categories[[i]]),4]<-names(categories[i])
+    }
+    foldPvalDF <- foldPvalDF[order(-as.numeric(factor(foldPvalDF[,4], levels=c(unique(names(categories)), "Other")))),]
+    if(length(categories)==3){shapeVec<-(c(19, 1, 19, 19))}
+    else{shapeVec<-c(19,19,19,19)}
+    #if more than one category, color points based on membership
+    #create scatter plot for central figure
+    scatter<-ggplot(foldPvalDF, aes(x=foldPvalDF$fold, y=foldPvalDF$CV, color=foldPvalDF$category))+
+    geom_point(aes(shape=category),alpha = 0.75)+
+    scale_colour_manual(values=c("cyan3", "black", "red", "darkorange"))+
+    scale_shape_manual(values=shapeVec)+
+    geom_vline(xintercept=0, linetype="dashed", color = "gray50")+
+    #geom_hline(yintercept=-20, linetype="dashed", color = "gray50")+
+    ylim(rev(ylims))+
+    xlim(xlims)+
+    theme_classic()+
+    theme(text = element_text(size=16), legend.position="bottom", legend.title=element_blank())+
+    theme(plot.caption = element_text(hjust = 0.5, size=14))+
+    guides(col=guide_legend(nrow=2,byrow=TRUE), shape=FALSE)+
+    labs(x = "BxM/MP", y="-avg(CV)", color="Category", caption=title)
+    #set up marginal density plot
+    densityplot<-axis_canvas(scatter, axis="x")+
+    geom_density(aes(fold, color=category), foldPvalDF, size=0.9)+
+    scale_color_manual(values=c("cyan3", "black", "red", "darkorange"))+
+    geom_vline(xintercept=0, linetype="dashed", color = "gray50")+
+    theme_void()+
+    theme(legend.title = element_blank())
+    #put two plots together
+    p <- insert_xaxis_grob(scatter, densityplot, position = "top")
+    #save
+    ggsave(plot=p, filename = "volcanoCVColor.tiff", device="tiff", dpi=600, width=6, height=6.83, compression = "lzw")
+  }
+  else{
+    #if one category
+    #set up scatter plot
+    scatter<-ggplot(foldPvalDF, aes(x=foldPvalDF$fold, y=foldPvalDF$CV))+
+    geom_point(alpha = 0.75, shape=pointShape)+
+    scale_colour_manual(values=c("black"))+
+    geom_vline(xintercept=0, linetype="dashed", color = "gray50")+
+    #geom_hline(yintercept=-20, linetype="dashed", color = "gray50")+
+    ylim(rev(ylims))+
+    xlim(xlims)+
+    theme_classic()+
+    theme(text = element_text(size=16), legend.position="bottom", plot.caption = element_text(hjust = 0.5, size=14))+
+    #theme(plot.margin = margin())+
+    #guides(col=guide_legend(nrow=2,byrow=TRUE))+
+    labs(x = "BxM/MP", y="-avg(CV)", caption=title)
+    #set up marginal density plot
+    densityplot<-axis_canvas(scatter, axis="x")+
+    geom_density(aes(fold), foldPvalDF, size=0.9)+
+    geom_vline(xintercept=0, linetype="dashed", color = "gray50")+
+    scale_color_manual(values=c("black"))+
+    theme_void()+
+    theme(legend.title = element_blank())
+    #put two plots together
+    p <- insert_xaxis_grob(scatter, densityplot, position = "top")
+    #save
+    ggsave(plot=p, filename = "volcanoCV.tiff", device="tiff", dpi=600, width=6, height=6, compression = "lzw")
+  }
+}
+```
+
+
+
+```{r}
+ggplot(PE.l2fc.cv.cbind, aes(x=AvgVal, y=cvVal, color=AvgVar)) +
+  geom_point()+
+  theme_light()+
+  theme(legend.position="bottom")+
+  xlab("log2(fc)")+
+  ylab("cv")
+```
+
+```{r}
+ggplot(data=test4, mapping = aes(x=test4$value, fill=variable))+
+  geom_histogram(binwidth=.015, position="dodge")
+```
+```{r}
+PE
+```
+
