@@ -1,0 +1,104 @@
+---
+title: "NCBI convert"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+### epost/efetch
+```{r Create GI vector, eval=FALSE, echo=FALSE}
+###Use the epost/efetch functions written by Laura to pull maizegdb accessions from XML file
+options(stringsAsFactors = FALSE)
+
+require(reutils)
+require(readr)
+require(XML)
+
+#get GI accessions
+giAccessions<-df$Accession
+#remove gi accessions with alphas AKA nonconvertible
+giAccessions<-giAccessions[-grep(giAccessions, pattern = "[a-zA-Z]")]
+```
+
+```{r epost, efetch, eval=FALSE, echo=FALSE}
+#if re-running this, delete old copy of efetch.txt from file first
+#first, convert GI to UID
+#because more than 500, need to use epost first
+p <- epost(giAccessions, db = "protein")
+#efetch genpept file format for each UID, save to text file (requirement for epost>500)
+efetch(p, db="protein",retmode = "text", rettype="gp", outfile = "efetch.txt")
+```
+
+```{r UID vec, eval=FALSE, echo=FALSE}
+#read in UID text
+UIDVec<-read.delim(file="efetch.txt", header = FALSE)
+#convert to vector
+UIDVec<-UIDVec[,1]
+#get gene IDs from full flat file
+UIDVec2<-UIDVec[grep(UIDVec, pattern="GeneID")]
+#gsub out "GeneID:" to get accession number
+UIDVec2<-gsub(UIDVec2, pattern=".*:", replacement = "")
+#check that there is a UID for each GI
+length(UIDVec2)==length(giAccessions)
+```
+
+```{r UID to Zm, eval=FALSE, echo=FALSE}
+#since >500, need to use epost
+#loop across total number of batches of 200
+#post to epost, fetch each XML, create conversion table
+#get number of batches
+batches<-seq(1:ceiling(length(UIDVec2)/200))
+batchEnd<-0
+#create empty df
+NCBIConvert<-NULL
+#loop across batches
+for(i in 1:length(batches)){
+  batchStart<-batchEnd+1
+  if(i<length(batches)){batchEnd<-batchEnd+200}else(batchEnd<-length(UIDVec2))
+  print(batchEnd)
+  f<-epost(UIDVec2[batchStart:batchEnd], db="gene")
+  allXML2<-content(efetch(f, db="gene", retmode="xml"), as="xml")
+  #pull out gene reference locus tag, if exists, if not, return "NA"
+  dbxrefs1<-as.list(xpathApply(allXML2,"//Gene-ref", function(x) {
+             if("Gene-ref_locus-tag" %in% names(x)){xmlValue(x[["Gene-ref_locus-tag"]])}
+             else {NA}
+              }))
+  #gsub out "ZEAMMB73_"
+  dbxrefs1<-gsub(dbxrefs1, pattern = "ZEAMMB73_", replacement = "")
+  #turn into character vector
+  dbxrefs1<-unlist(dbxrefs1)
+
+    
+  #now get UIDs back (to check for length of XML)
+  dbxrefs2<-as.list(xpathApply(allXML2,"//Entrezgene_track-info/Gene-track",function(x) {
+             if("Gene-track_geneid" %in% names(x)){xmlValue(x[["Gene-track_geneid"]])}
+             else {NA}
+              }))
+  #turn into character vector
+  dbxrefs2<-unlist(dbxrefs2)
+  
+  #check that original gi length == number of XML entries efetched
+  200==length(dbxrefs2)
+  #check that number of Zm accessions matches number of gi accessions
+  200==length(dbxrefs1)
+
+  #put together
+  tmp<-cbind(giAccessions[batchStart:batchEnd], dbxrefs2, dbxrefs1)
+  NCBIConvert<-rbind(NCBIConvert, tmp)
+}
+#rename columns
+colnames(NCBIConvert)<-c("GI", "UID", "maizegdb.epost")
+
+NCBIConvert2 <- as.data.frame(NCBIConvert)
+
+#remove missing maizegdbid columns
+NCBIConvert2 <- NCBIConvert2[!(NCBIConvert2$maizegdb.epost=="NA"),]
+#Print stats
+print(paste0("Input numeric GIs with a corresponding numeric UID = ",length((NCBIConvert2$GI))))
+print(paste0("Unique MaizeGDB IDs returned = ",length(unique(NCBIConvert2$maizegdb.epost))))
+```
+
+```{r Merge Acc Conversion back with Data, eval=FALSE, echo=FALSE}
+df_epost <- merge.data.frame(df, NCBIConvert2, by.x = "Accession", by.y = "GI", all=T)
+```
